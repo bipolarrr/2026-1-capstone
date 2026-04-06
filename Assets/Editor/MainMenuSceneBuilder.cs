@@ -37,7 +37,7 @@ public static class MainMenuSceneBuilder
 		camera.tag = "MainCamera";
 		var cameraComponent = camera.AddComponent<Camera>();
 		cameraComponent.clearFlags = CameraClearFlags.SolidColor;
-		cameraComponent.backgroundColor = new Color(0.09f, 0.09f, 0.15f, 1f);
+		cameraComponent.backgroundColor = Color.black;
 		cameraComponent.orthographic = true;
 		cameraComponent.orthographicSize = 5f;
 		camera.transform.position = new Vector3(0, 0, -10);
@@ -63,61 +63,35 @@ public static class MainMenuSceneBuilder
 		// ── MenuRoot (MainMenuController + ButtonHandler 붙이는 곳) ──
 		var menuRoot = new GameObject("MenuRoot");
 
-		// ── Background ──────────────────────────────────────────────
-		var background = CreateUIPanel(canvasObject.transform, "Background", new Color(0.06f, 0.07f, 0.13f, 1f));
-		SetStretch(background);
-
-		// 배경 그라디언트 느낌 — 위쪽 반을 살짝 밝게
-		var topGradient = CreateUIPanel(background.transform, "BackgroundTopGradient", new Color(0.12f, 0.13f, 0.22f, 0.5f));
-		var topGradientRect = topGradient.GetComponent<RectTransform>();
-		topGradientRect.anchorMin = new Vector2(0, 0.5f);
-		topGradientRect.anchorMax = new Vector2(1, 1f);
-		topGradientRect.offsetMin = Vector2.zero;
-		topGradientRect.offsetMax = Vector2.zero;
-
-		// 배경 장식선 2개 (수평)
-		CreateDecorationLine(background.transform, "DecorationLineTop", new Vector2(0.72f, 0f), new Color(0.3f, 0.5f, 0.9f, 0.15f));
-		CreateDecorationLine(background.transform, "DecorationLineBottom", new Vector2(0.28f, 0f), new Color(0.3f, 0.5f, 0.9f, 0.10f));
-
-		// ── LogoGroup ───────────────────────────────────────────────
+		// ── 배경 이미지 (화면 전체) ────────────────────────────────
 		var logoGroup = new GameObject("LogoGroup");
 		var logoGroupRect = logoGroup.AddComponent<RectTransform>();
 		logoGroupRect.SetParent(canvasObject.transform, false);
-		// 좌측 중앙보다 살짝 위
-		logoGroupRect.anchorMin = new Vector2(0.04f, 0.62f);
-		logoGroupRect.anchorMax = new Vector2(0.48f, 0.80f);
+		logoGroupRect.anchorMin = Vector2.zero;
+		logoGroupRect.anchorMax = Vector2.one;
 		logoGroupRect.offsetMin = Vector2.zero;
 		logoGroupRect.offsetMax = Vector2.zero;
 		var logoCanvasGroup = logoGroup.AddComponent<CanvasGroup>();
 
-		// 로고 텍스트 (placeholder)
-		var logoTextObject = CreateTMPText(logoGroup.transform, "LogoText",
-			"마작 홀덤 주사위 디펜스", 100, FontStyles.Bold,
-			new Color(0.95f, 0.95f, 1f, 1f));
-		SetStretch(logoTextObject);
-		var logoText = logoTextObject.GetComponent<TMP_Text>();
-		logoText.alignment = TextAlignmentOptions.MidlineLeft;
+		var logoSprite = AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Mobs/MainScreen_logo.png");
+		if (logoSprite == null)
+			Debug.LogWarning("[MainMenuSceneBuilder] 메인화면 스프라이트를 찾을 수 없습니다: Assets/Mobs/MainScreen_logo.png");
+		var logoImage = new GameObject("BackgroundImage");
+		var logoImageRect = logoImage.AddComponent<RectTransform>();
+		logoImageRect.SetParent(logoGroup.transform, false);
+		SetStretch(logoImage);
+		var logoImg = logoImage.AddComponent<Image>();
+		logoImg.sprite = logoSprite;
+		logoImg.type = Image.Type.Simple;
+		logoImg.preserveAspect = false;
+		logoImg.raycastTarget = false;
 
-		// 로고 아래 부제 텍스트
-		var subTitleObject = CreateTMPText(logoGroup.transform, "SubTitleText",
-			"로그라이트 덱빌딩 요소 함유", 50, FontStyles.Italic,
-			new Color(0.7f, 0.75f, 1f, 0.8f));
-		SetStretch(subTitleObject);
-		var subTitle = subTitleObject.GetComponent<TMP_Text>();
-		subTitle.alignment = TextAlignmentOptions.MidlineLeft;
-		var subTitleRect = subTitleObject.GetComponent<RectTransform>();
-		subTitleRect.anchorMin = new Vector2(0, -0.55f);
-		subTitleRect.anchorMax = new Vector2(1, -0.05f);
-		subTitleRect.offsetMin = Vector2.zero;
-		subTitleRect.offsetMax = Vector2.zero;
-
-		// ── MenuButtons ─────────────────────────────────────────────
+		// ── MenuButtons (우측) ──────────────────────────────────────
 		var menuButtons = new GameObject("MenuButtons");
 		var menuButtonsRect = menuButtons.AddComponent<RectTransform>();
 		menuButtonsRect.SetParent(canvasObject.transform, false);
-		// 좌측, 중단~하단 사이
-		menuButtonsRect.anchorMin = new Vector2(0.04f, 0.10f);
-		menuButtonsRect.anchorMax = new Vector2(0.30f, 0.44f);
+		menuButtonsRect.anchorMin = new Vector2(0.65f, 0.08f);
+		menuButtonsRect.anchorMax = new Vector2(0.95f, 0.45f);
 		menuButtonsRect.offsetMin = Vector2.zero;
 		menuButtonsRect.offsetMax = Vector2.zero;
 		var menuButtonsCanvasGroup = menuButtons.AddComponent<CanvasGroup>();
@@ -133,81 +107,14 @@ public static class MainMenuSceneBuilder
 		var settingsButton = CreateMenuButton(menuButtons.transform, "SettingsButton", "⚙  Settings");
 		var creditsButton = CreateMenuButton(menuButtons.transform, "CreditsButton", "✦  Credits");
 
-		// ── CharacterAnchor ─────────────────────────────────────────
-		var characterAnchor = new GameObject("CharacterAnchor");
-		var characterAnchorRect = characterAnchor.AddComponent<RectTransform>();
-		characterAnchorRect.SetParent(canvasObject.transform, false);
-		characterAnchorRect.SetSiblingIndex(1); // Background 다음, LogoGroup 앞 → 제목 뒤에 렌더링
-		characterAnchorRect.anchorMin = new Vector2(0.58f, 0.05f);
-		characterAnchorRect.anchorMax = new Vector2(0.92f, 0.92f);
-		characterAnchorRect.offsetMin = Vector2.zero;
-		characterAnchorRect.offsetMax = Vector2.zero;
-		var characterAnchorCanvasGroup = characterAnchor.AddComponent<CanvasGroup>();
-
-		// Character placeholder (단순 이미지 패널)
-		var character = new GameObject("Character");
-		var characterRect = character.AddComponent<RectTransform>();
-		characterRect.SetParent(characterAnchor.transform, false);
-		characterRect.anchorMin = new Vector2(0.15f, 0.05f);
-		characterRect.anchorMax = new Vector2(0.85f, 0.95f);
-		characterRect.offsetMin = Vector2.zero;
-		characterRect.offsetMax = Vector2.zero;
-
-		// 캐릭터 몸통 (둥근 사각형 느낌, 파란 계열)
-		var body = CreateUIPanel(character.transform, "Body", new Color(0.25f, 0.38f, 0.75f, 1f));
-		SetStretch(body);
-
-		// 캐릭터 얼굴 (상단 30%)
-		var face = CreateUIPanel(character.transform, "Face", new Color(0.95f, 0.85f, 0.7f, 1f));
-		var faceRect = face.GetComponent<RectTransform>();
-		faceRect.anchorMin = new Vector2(0.25f, 0.65f);
-		faceRect.anchorMax = new Vector2(0.75f, 0.95f);
-		faceRect.offsetMin = Vector2.zero;
-		faceRect.offsetMax = Vector2.zero;
-
-		// 눈
-		var leftEye = CreateUIPanel(character.transform, "EyeLeft", new Color(0.1f, 0.1f, 0.1f, 1f));
-		var leftEyeRect = leftEye.GetComponent<RectTransform>();
-		leftEyeRect.anchorMin = new Vector2(0.33f, 0.75f);
-		leftEyeRect.anchorMax = new Vector2(0.44f, 0.85f);
-		leftEyeRect.offsetMin = Vector2.zero;
-		leftEyeRect.offsetMax = Vector2.zero;
-
-		var rightEye = CreateUIPanel(character.transform, "EyeRight", new Color(0.1f, 0.1f, 0.1f, 1f));
-		var rightEyeRect = rightEye.GetComponent<RectTransform>();
-		rightEyeRect.anchorMin = new Vector2(0.56f, 0.75f);
-		rightEyeRect.anchorMax = new Vector2(0.67f, 0.85f);
-		rightEyeRect.offsetMin = Vector2.zero;
-		rightEyeRect.offsetMax = Vector2.zero;
-
-		// 클릭 투명 오버레이 (전체 캐릭터 영역)
-		var clickArea = CreateUIPanel(character.transform, "ClickArea", new Color(0, 0, 0, 0));
-		SetStretch(clickArea);
-		clickArea.AddComponent<CharacterEasterEggController>();
-
-		// ── SpeechBubble ─────────────────────────────────────────────
-		var speechBubble = CreateUIPanel(character.transform, "SpeechBubble", new Color(0.12f, 0.12f, 0.2f, 0.92f));
-		var speechBubbleRect = speechBubble.GetComponent<RectTransform>();
-		speechBubbleRect.anchorMin = new Vector2(-0.4f, 0.85f);
-		speechBubbleRect.anchorMax = new Vector2(0.75f, 1.1f);
-		speechBubbleRect.offsetMin = Vector2.zero;
-		speechBubbleRect.offsetMax = Vector2.zero;
-		speechBubble.SetActive(false);
-
-		var speechTextObject = CreateTMPText(speechBubble.transform, "SpeechText","건드리지 마!", 22, FontStyles.Normal, new Color(0.95f, 0.95f, 1f, 1f));
-		SetStretch(speechTextObject);
-		var speechText = speechTextObject.GetComponent<TMP_Text>();
-		speechText.alignment = TextAlignmentOptions.Center;
-
-		// CharacterEasterEggController 참조 자동 연결
-		var easterEgg = clickArea.GetComponent<CharacterEasterEggController>();
-		SetPrivateField(easterEgg, "speechBubble", speechBubble);
-		SetPrivateField(easterEgg, "speechText", speechTextObject.GetComponent<TMP_Text>());
-
 		// ── SettingsPopup ────────────────────────────────────────────
+		var settingsDimmer = CreateDimmer(canvasObject.transform, "SettingsDimmer");
 		var settingsPopup = BuildSettingsPopup(canvasObject.transform);
+		SetPrivateField(settingsPopup.GetComponent<SimplePopup>(), "dimmer", settingsDimmer.GetComponent<Image>());
 		// ── CreditsPopup ─────────────────────────────────────────────
+		var creditsDimmer = CreateDimmer(canvasObject.transform, "CreditsDimmer");
 		var creditsPopup = BuildCreditsPopup(canvasObject.transform);
+		SetPrivateField(creditsPopup.GetComponent<SimplePopup>(), "dimmer", creditsDimmer.GetComponent<Image>());
 
 		// ── MenuRoot에 컴포넌트 붙이기 ───────────────────────────────
 		// MenuRoot는 씬 내 적당한 위치 (Canvas 바깥)
@@ -217,7 +124,6 @@ public static class MainMenuSceneBuilder
 		// MainMenuController 참조 연결
 		SetPrivateField(menuController, "logoGroup", logoCanvasGroup);
 		SetPrivateField(menuController, "menuButtonsGroup", menuButtonsCanvasGroup);
-		SetPrivateField(menuController, "characterGroup", characterAnchorCanvasGroup);
 
 		// MainMenuButtonHandler 참조 연결
 		SetPrivateField(buttonHandler, "menuController", menuController);
@@ -266,28 +172,9 @@ public static class MainMenuSceneBuilder
 	}
 
 	private static void SetStretch(GameObject target)
-	{
-		var rect = target.GetComponent<RectTransform>();
-		rect.anchorMin = Vector2.zero;
-		rect.anchorMax = Vector2.one;
-		rect.offsetMin = Vector2.zero;
-		rect.offsetMax = Vector2.zero;
-	}
+		=> SceneBuilderUtility.Stretch(target.GetComponent<RectTransform>());
 
-	private static void CreateDecorationLine(Transform parent, string name,
-		Vector2 anchorPositionY, Color color)
-	{
-		// anchorPositionY.x = y 위치 (0~1), anchorPositionY.y = 무시
-		float verticalPosition = anchorPositionY.x;
-		var line = CreateUIPanel(parent, name, color);
-		var rect = line.GetComponent<RectTransform>();
-		rect.anchorMin = new Vector2(0f, verticalPosition - 0.002f);
-		rect.anchorMax = new Vector2(1f, verticalPosition + 0.002f);
-		rect.offsetMin = Vector2.zero;
-		rect.offsetMax = Vector2.zero;
-	}
-
-	private const string FontRegularPath = "Assets/TextMesh Pro/Fonts/Mona12.asset";
+private const string FontRegularPath = "Assets/TextMesh Pro/Fonts/Mona12.asset";
 	private const string FontBoldPath    = "Assets/TextMesh Pro/Fonts/Mona12-Bold.asset";
 
 	private static TMP_FontAsset LoadFont(FontStyles style)
@@ -300,18 +187,19 @@ public static class MainMenuSceneBuilder
 
 	private static GameObject CreateTMPText(Transform parent, string name, string text, float size, FontStyles style, Color color)
 	{
+		var font = LoadFont(style);
+
 		var textObject = new GameObject(name);
 		var rect = textObject.AddComponent<RectTransform>();
 		rect.SetParent(parent, false);
 		var textComponent = textObject.AddComponent<TextMeshProUGUI>();
+		if (font != null)
+			textComponent.font = font;
 		textComponent.text = text;
 		textComponent.fontSize = size;
 		textComponent.fontStyle = style;
 		textComponent.color = color;
-		textComponent.enableWordWrapping = false;
-		var font = LoadFont(style);
-		if (font != null)
-			textComponent.font = font;
+		textComponent.textWrappingMode = TextWrappingModes.NoWrap;
 		return textObject;
 	}
 
@@ -379,6 +267,7 @@ public static class MainMenuSceneBuilder
 
 		// Close 버튼
 		var closeButton = CreateMenuButton(settingsPopup.transform, "CloseButton", "✕  Close");
+		closeButton.GetComponentInChildren<TMP_Text>().fontSize = 28;
 		var closeButtonRect = closeButton.GetComponent<RectTransform>();
 		closeButtonRect.anchorMin = new Vector2(0.3f, 0.04f);
 		closeButtonRect.anchorMax = new Vector2(0.7f, 0.22f);
@@ -498,10 +387,11 @@ public static class MainMenuSceneBuilder
 
 		var bodyLines = new string[]
 		{
-			"<size=40><b>GAME TITLE</b></size>",
+			"<size=40><b>마작홀덤주사위디펜스</b></size>",
 			"",
-			"<size=26>Made by  <color=#8899ff>Team Capstone</color></size>",
-			"<size=22>Programming  ·  Art  ·  Design</size>",
+			"<size=26>Made by  <color=#8899ff>이차원스튜디오</color></size>",
+			"<size=22>Code  ·  송지한</size>",
+			"<size=22>Art / Design  ·  장진영</size>",
 			"",
 			"<size=20><color=#6677aa>© 2026 All rights reserved.</color></size>"
 		};
@@ -514,9 +404,10 @@ public static class MainMenuSceneBuilder
 		creditsTextRect.offsetMin = Vector2.zero;
 		creditsTextRect.offsetMax = Vector2.zero;
 		creditsTextObject.GetComponent<TMP_Text>().alignment = TextAlignmentOptions.Center;
-		creditsTextObject.GetComponent<TMP_Text>().enableWordWrapping = true;
+		creditsTextObject.GetComponent<TMP_Text>().textWrappingMode = TextWrappingModes.Normal;
 
 		var closeButton = CreateMenuButton(creditsPopup.transform, "CloseButton", "✕  Close");
+		closeButton.GetComponentInChildren<TMP_Text>().fontSize = 28;
 		var closeButtonRect = closeButton.GetComponent<RectTransform>();
 		closeButtonRect.anchorMin = new Vector2(0.3f, 0.03f);
 		closeButtonRect.anchorMax = new Vector2(0.7f, 0.18f);
@@ -529,34 +420,36 @@ public static class MainMenuSceneBuilder
 		return creditsPopup;
 	}
 
-	private static void CenterPopup(GameObject target, float width, float height)
+	private static GameObject CreateDimmer(Transform canvasParent, string name)
 	{
-		var rect = target.GetComponent<RectTransform>();
-		rect.anchorMin = new Vector2(0.5f, 0.5f);
-		rect.anchorMax = new Vector2(0.5f, 0.5f);
-		rect.pivot = new Vector2(0.5f, 0.5f);
-		rect.sizeDelta = new Vector2(width, height);
-		rect.anchoredPosition = Vector2.zero;
+		var dimmer = new GameObject(name);
+		var rect = dimmer.AddComponent<RectTransform>();
+		rect.SetParent(canvasParent, false);
+		rect.anchorMin = Vector2.zero;
+		rect.anchorMax = Vector2.one;
+		rect.offsetMin = Vector2.zero;
+		rect.offsetMax = Vector2.zero;
+
+		var image = dimmer.AddComponent<Image>();
+		image.color = new Color(0f, 0f, 0f, 0f);
+		image.raycastTarget = true;
+
+		dimmer.SetActive(false);
+		return dimmer;
 	}
 
+	private static void CenterPopup(GameObject target, float width, float height)
+		=> SceneBuilderUtility.CenterPopup(target, width, height);
+
 	private static void SetPrivateField(object target, string fieldName, object value)
-	{
-		if (target == null)
-			return;
-		var fieldInfo = target.GetType().GetField(fieldName,
-			BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-		if (fieldInfo != null)
-			fieldInfo.SetValue(target, value);
-		else
-			Debug.LogWarning($"[MainMenuSceneBuilder] Field '{fieldName}' not found on {target.GetType().Name}");
-	}
+		=> SceneBuilderUtility.SetField(target, fieldName, value);
 
 	private static void AddSceneToBuildSettings(string path)
 	{
 		var scenes = EditorBuildSettings.scenes;
 		foreach (var existingScene in scenes)
 			if (existingScene.path == path)
-				return; // 이미 있음
+				return;
 
 		var updatedScenes = new EditorBuildSettingsScene[scenes.Length + 1];
 		// MainMenu를 첫 번째(index 0)에 삽입

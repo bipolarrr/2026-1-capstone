@@ -4,7 +4,7 @@
 /// </summary>
 public enum CharacterType
 {
-	Mahjong,   // 마작패를 무기로 사용
-	Holdem,    // 홀덤 카드를 무기로 사용
-	Dice,      // 주사위를 무기로 사용
+	Mahjong,
+	Holdem,
+	Dice,
 }

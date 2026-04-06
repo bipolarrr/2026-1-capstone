@@ -12,28 +12,42 @@ public class MainMenuButtonHandler : MonoBehaviour
 	[SerializeField] private SimplePopup settingsPopup;
 	[SerializeField] private SimplePopup creditsPopup;
 
-	// ─── 버튼 OnClick 이벤트에 연결 ──────────────────────────
 	public void OnPlayClicked()
 	{
 		if (menuController != null)
+		{
+			Debug.Log("[MainMenu] OnPlayClicked → CharacterSelect");
 			menuController.LoadGameScene();
+		}
 		else
-			Debug.Log("Play clicked");
+		{
+			Debug.LogError("[MainMenu] OnPlayClicked 실패: menuController가 null");
+		}
 	}
 
 	public void OnSettingsClicked()
 	{
 		if (settingsPopup != null)
+		{
+			Debug.Log("[MainMenu] OnSettingsClicked → 설정 팝업 열기");
 			settingsPopup.Open();
+		}
 		else
-			Debug.LogWarning("Settings popup not assigned.");
+		{
+			Debug.LogWarning("[MainMenu] OnSettingsClicked 실패: settingsPopup이 null");
+		}
 	}
 
 	public void OnCreditsClicked()
 	{
 		if (creditsPopup != null)
+		{
+			Debug.Log("[MainMenu] OnCreditsClicked → 크레딧 팝업 열기");
 			creditsPopup.Open();
+		}
 		else
-			Debug.LogWarning("Credits popup not assigned.");
+		{
+			Debug.LogWarning("[MainMenu] OnCreditsClicked 실패: creditsPopup이 null");
+		}
 	}
 }

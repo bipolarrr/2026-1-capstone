@@ -46,16 +46,16 @@ public class SettingsPopupController : MonoBehaviour
 	{
 		_bgmVolume = value;
 		UpdateBGMLabel(value);
-		Debug.Log($"BGM Volume: {value:F2}");
-		// TODO: AudioManager.Instance.SetBGMVolume(value);
+		Debug.Log($"[Settings] BGM 변경: {value:P0}");
+		// TODO: AudioManager 구현 후 연결
 	}
 
 	public void OnSFXChanged(float value)
 	{
 		_sfxVolume = value;
 		UpdateSFXLabel(value);
-		Debug.Log($"SFX Volume: {value:F2}");
-		// TODO: AudioManager.Instance.SetSFXVolume(value);
+		Debug.Log($"[Settings] SFX 변경: {value:P0}");
+		// TODO: AudioManager 구현 후 연결
 	}
 
 	private void UpdateBGMLabel(float v)

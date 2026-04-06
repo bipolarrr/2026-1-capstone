@@ -1,7 +1,3 @@
-// Assets/Scripts/Dice/YachtDie.cs
-// 야추 전용 d6 주사위 하나를 담당한다.
-// 호버 시 주사위 외곽에 글로우 아웃라인 표시, 클릭 시 Save Zone으로 이동.
-
 using System.Collections;
 using UnityEngine;
 
@@ -17,10 +13,37 @@ public class YachtDie : MonoBehaviour
 
 	[Header("아웃라인")]
 	[SerializeField] private float outlineScale = 1.12f;
+	[SerializeField] private Material outlineBaseMaterial;
 
 	public int  Result    { get; private set; } = 1;
 	public bool IsHeld    { get; private set; } = false;
 	public bool IsRolling { get; private set; } = false;
+
+	/// <summary>디버그용: 결과값을 강제로 설정한다.</summary>
+	public void ForceResult(int value)
+	{
+		Result = Mathf.Clamp(value, 1, 6);
+	}
+
+	/// <summary>디버그용: 결과값을 설정하고 해당 눈이 위를 향하도록 회전한다.</summary>
+	public void ForceResultWithRotation(int value)
+	{
+		Result = Mathf.Clamp(value, 1, 6);
+
+		// FaceMap에서 해당 값의 로컬 노멀을 찾는다
+		Vector3 faceNormal = Vector3.up;
+		foreach (var (normal, v) in FaceMap)
+		{
+			if (v == Result)
+			{
+				faceNormal = normal;
+				break;
+			}
+		}
+
+		// 해당 노멀이 월드 업을 향하도록 회전
+		transform.rotation = Quaternion.FromToRotation(faceNormal, Vector3.up);
+	}
 
 	/// <summary>멈춘 뒤 호출. (이 주사위, 눈금)</summary>
 	public event System.Action<YachtDie, int> OnSettled;
@@ -28,7 +51,6 @@ public class YachtDie : MonoBehaviour
 	private Rigidbody    body;
 	private MeshRenderer meshRenderer;
 
-	// 아웃라인 (주사위 메시를 약간 확대한 반투명 복제)
 	private GameObject   outlineObject;
 	private MeshRenderer outlineRenderer;
 	private Material     outlineMaterial;
@@ -36,10 +58,9 @@ public class YachtDie : MonoBehaviour
 	private static readonly Color HoverColor = new Color(0.3f, 0.7f, 1.0f, 0.85f);
 	private static readonly Color HeldColor  = new Color(1.0f, 0.15f, 0.15f, 0.9f);
 
-	// 이동 코루틴
 	private Coroutine moveCoroutine;
 
-	// 보관 전 위치/회전 기억 (취소 시 복원용)
+	// 홀드 해제 시 복귀할 위치/회전. SetHeld(true) 시점에 캡처.
 	private Vector3    positionBeforeHeld;
 	private Quaternion rotationBeforeHeld;
 
@@ -54,11 +75,8 @@ public class YachtDie : MonoBehaviour
 		(Vector3.back,    6),
 	};
 
-	// 탈출 감지용
 	private const float FallThreshold = -5f;
 	private Vector3 spawnPosition;
-
-	// ── 초기화 ───────────────────────────────────────────────────────
 
 	private void Awake()
 	{
@@ -72,9 +90,10 @@ public class YachtDie : MonoBehaviour
 		CreateOutline();
 	}
 
+	// IsRolling 중에는 복구 루틴이 이미 진행 중이므로 재진입 방지
 	private void FixedUpdate()
 	{
-		if (transform.position.y < FallThreshold)
+		if (!IsRolling && transform.position.y < FallThreshold)
 			RecoverFromFall();
 	}
 
@@ -91,9 +110,29 @@ public class YachtDie : MonoBehaviour
 		transform.position = spawnPosition + Vector3.up * 1.5f;
 		transform.rotation = Random.rotation;
 
-		IsRolling = false;
 		IsHeld = false;
+		IsRolling = true;
+		StartCoroutine(WaitForSettleAfterRecovery());
+	}
+
+	private IEnumerator WaitForSettleAfterRecovery()
+	{
+		yield return new WaitForSeconds(0.3f);
+
+		float stableTime = 0f;
+		while (stableTime < settleConfirmTime)
+		{
+			yield return new WaitForFixedUpdate();
+			bool isStill = body.linearVelocity.magnitude < settleThreshold
+				&& body.angularVelocity.magnitude < settleThreshold;
+			if (isStill)
+				stableTime += Time.fixedDeltaTime;
+			else
+				stableTime = 0f;
+		}
+
 		Result = ReadTopFace();
+		IsRolling = false;
 		OnSettled?.Invoke(this, Result);
 	}
 
@@ -107,7 +146,6 @@ public class YachtDie : MonoBehaviour
 			return;
 		}
 
-		// MeshCollider가 없으면 메시 기반으로 생성
 		var filter = GetComponent<MeshFilter>();
 		if (filter == null) filter = GetComponentInChildren<MeshFilter>();
 		if (filter == null || filter.sharedMesh == null) return;
@@ -119,7 +157,6 @@ public class YachtDie : MonoBehaviour
 
 	private void CreateOutline()
 	{
-		// 주사위 메시를 찾아 외곽 아웃라인 생성
 		var meshFilter = GetComponent<MeshFilter>();
 		if (meshFilter == null) meshFilter = GetComponentInChildren<MeshFilter>();
 		if (meshFilter == null || meshFilter.sharedMesh == null) return;
@@ -133,14 +170,29 @@ public class YachtDie : MonoBehaviour
 		// 부모 주사위와 같은 레이어 (DiceCamera에만 렌더)
 		outlineObject.layer = gameObject.layer;
 
-		// 동일 메시 사용
 		var filter = outlineObject.AddComponent<MeshFilter>();
 		filter.sharedMesh = meshFilter.sharedMesh;
 
 		outlineRenderer = outlineObject.AddComponent<MeshRenderer>();
 
-		// URP Unlit + Front-face culling → 뒷면만 렌더 → 모서리 테두리만 표시
-		outlineMaterial = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
+		// 씬 빌더에서 주입된 베이스 머티리얼을 인스턴스화
+		if (outlineBaseMaterial != null)
+		{
+			outlineMaterial = new Material(outlineBaseMaterial);
+		}
+		else
+		{
+			// 폴백: 에디터 전용 (빌드에서는 outlineBaseMaterial이 주입되어야 함)
+			var shader = Shader.Find("Universal Render Pipeline/Unlit");
+			if (shader == null)
+			{
+				Debug.LogWarning("[YachtDie] URP Unlit 셰이더를 찾을 수 없음 — 아웃라인 비활성화");
+				Destroy(outlineObject);
+				outlineObject = null;
+				return;
+			}
+			outlineMaterial = new Material(shader);
+		}
 		outlineMaterial.SetFloat("_Surface", 1f);
 		outlineMaterial.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
 		outlineMaterial.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
@@ -154,17 +206,17 @@ public class YachtDie : MonoBehaviour
 		outlineObject.SetActive(false);
 	}
 
-	// ── 외부 API ────────────────────────────────────────────────────
-
 	/// <summary>커서가 올라왔을 때 호출 (파란 아웃라인 표시).</summary>
 	public void SetHovered(bool hovered)
 	{
-		if (IsHeld) return; // 보관 중이면 아웃라인 상태 유지
-		outlineObject.SetActive(hovered);
-		if (hovered) outlineMaterial.SetColor("_BaseColor", HoverColor);
+		if (IsHeld) return;
+		if (outlineObject != null)
+			outlineObject.SetActive(hovered);
+		if (hovered && outlineMaterial != null)
+			outlineMaterial.SetColor("_BaseColor", HoverColor);
 	}
 
-	/// <summary>보관 상태 전환. targetPos 는 Save Zone 월드 좌표.</summary>
+	/// <summary>보관 상태 전환. targetPos 는 Vault 월드 좌표.</summary>
 	public void SetHeld(bool held, Vector3 targetPos)
 	{
 		if (moveCoroutine != null) StopCoroutine(moveCoroutine);
@@ -174,30 +226,34 @@ public class YachtDie : MonoBehaviour
 
 		if (held && !IsHeld)
 		{
-			// 보관 전 현재 위치/회전 기억
 			positionBeforeHeld = transform.position;
 			rotationBeforeHeld = transform.rotation;
 		}
 
 		IsHeld = held;
 
-		// 아웃라인 색상 갱신
-		outlineObject.SetActive(held);
-		if (held) outlineMaterial.SetColor("_BaseColor", HeldColor);
+		if (outlineObject != null)
+			outlineObject.SetActive(held);
+		if (held && outlineMaterial != null)
+			outlineMaterial.SetColor("_BaseColor", HeldColor);
 
 		if (held)
 		{
-			// Save Zone으로 이동 — 물리 완전 잠금
+			// 격리 공간(Vault)으로 순간이동 — 현재 결과값의 눈이 위를 향하도록 정렬
 			body.isKinematic = true;
 			body.constraints = RigidbodyConstraints.FreezeAll;
-			moveCoroutine = StartCoroutine(SmoothMove(targetPos, transform.rotation));
+			transform.position = targetPos;
+			AlignToTopFace();
 		}
 		else
 		{
-			// 원래 위치로 복귀 — kinematic 상태로 이동 후 도착하면 물리 복원
-			body.isKinematic = true;
-			moveCoroutine = StartCoroutine(SmoothMoveAndRelease(
-				positionBeforeHeld, rotationBeforeHeld));
+			// 원래 위치로 순간이동 후 물리 복원
+			transform.position = positionBeforeHeld;
+			transform.rotation = rotationBeforeHeld;
+			body.constraints = RigidbodyConstraints.None;
+			body.linearVelocity  = Vector3.zero;
+			body.angularVelocity = Vector3.zero;
+			body.isKinematic = false;
 		}
 	}
 
@@ -209,12 +265,11 @@ public class YachtDie : MonoBehaviour
 		StartCoroutine(RollRoutine());
 	}
 
-	// ── 내부 ────────────────────────────────────────────────────────
-
 	private IEnumerator RollRoutine()
 	{
 		IsRolling = true;
-		outlineObject.SetActive(false);
+		if (outlineObject != null)
+			outlineObject.SetActive(false);
 
 		body.isKinematic = false;
 		body.linearVelocity  = Vector3.zero;
@@ -223,6 +278,7 @@ public class YachtDie : MonoBehaviour
 			Random.Range(-0.1f, 0.1f), launchHeight, Random.Range(-0.05f, 0.05f));
 		transform.rotation = Random.rotation;
 
+		// transform 직접 이동 후 다음 FixedUpdate까지 대기해야 물리 엔진이 새 위치를 인식
 		yield return new WaitForFixedUpdate();
 
 		Vector3 direction = new Vector3(Random.Range(-0.6f, 0.6f), -0.4f, Random.Range(-0.2f, 0.2f)).normalized;
@@ -258,7 +314,7 @@ public class YachtDie : MonoBehaviour
 		while (t < 1f)
 		{
 			t = Mathf.Min(t + Time.deltaTime * 7f, 1f);
-			float ease = 1f - Mathf.Pow(1f - t, 3f); // ease-out cubic
+			float ease = 1f - Mathf.Pow(1f - t, 3f);
 			transform.position = Vector3.Lerp(startPosition, target, ease);
 			transform.rotation = Quaternion.Slerp(startRotation, targetRotation, ease);
 			yield return null;
@@ -298,5 +354,20 @@ public class YachtDie : MonoBehaviour
 			if (dot > best) { best = dot; result = value; }
 		}
 		return result;
+	}
+
+	/// <summary>현재 Result 값의 면이 정확히 위를 향하도록 회전을 정렬한다.</summary>
+	private void AlignToTopFace()
+	{
+		Vector3 faceNormal = Vector3.up;
+		foreach (var (normal, value) in FaceMap)
+		{
+			if (value == Result)
+			{
+				faceNormal = normal;
+				break;
+			}
+		}
+		transform.rotation = Quaternion.FromToRotation(faceNormal, Vector3.up);
 	}
 }

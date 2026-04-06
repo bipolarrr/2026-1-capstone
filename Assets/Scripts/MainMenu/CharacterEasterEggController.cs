@@ -56,7 +56,6 @@ public class CharacterEasterEggController : MonoBehaviour,
 	{
 		if (_rectTransform == null)
 			return;
-		// Idle: 사인파로 위아래 이동
 		float offset = Mathf.Sin(Time.time * idleSpeed) * idleAmplitude;
 		_rectTransform.anchoredPosition = _originPos + new Vector2(0f, offset);
 	}
@@ -87,7 +86,6 @@ public class CharacterEasterEggController : MonoBehaviour,
 	// ─── 내부 로직 ───────────────────────────────────────────
 	private string PickReaction()
 	{
-		// 연속 클릭 시 순차 순환, 일반 시 랜덤
 		if (_clickCount >= 3)
 			return Reactions[(_clickCount - 1) % Reactions.Length];
 		return Reactions[Random.Range(0, Reactions.Length)];

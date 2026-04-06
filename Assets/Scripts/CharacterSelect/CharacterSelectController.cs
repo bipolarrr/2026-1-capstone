@@ -28,10 +28,15 @@ public class CharacterSelectController : MonoBehaviour
 	[SerializeField] private SimplePopup unavailablePopup;
 	[SerializeField] private TMP_Text unavailableMessageText;
 
+	[Header("전투 규칙 패널")]
+	[SerializeField] private TMP_Text rulesTitle;
+	[SerializeField] private TMP_Text rulesBody;
+	[SerializeField] private GameObject rulesDetailButton;
+
 	private int currentIndex;
 
 	private const string MainMenuSceneName = "MainMenu";
-	private const string GameSceneName = "GameScene";
+	private const string GameSceneName = "GameExploreScene";
 
 	void Start()
 	{
@@ -48,6 +53,7 @@ public class CharacterSelectController : MonoBehaviour
 			return;
 
 		currentIndex = (currentIndex - 1 + characters.Length) % characters.Length;
+		Debug.Log($"[CharSelect] SelectPrevious → idx={currentIndex} name=\"{characters[currentIndex].displayName}\"");
 		UpdateDisplay();
 	}
 
@@ -58,6 +64,7 @@ public class CharacterSelectController : MonoBehaviour
 			return;
 
 		currentIndex = (currentIndex + 1) % characters.Length;
+		Debug.Log($"[CharSelect] SelectNext → idx={currentIndex} name=\"{characters[currentIndex].displayName}\"");
 		UpdateDisplay();
 	}
 
@@ -74,17 +81,21 @@ public class CharacterSelectController : MonoBehaviour
 
 		if (!selected.isAvailable)
 		{
+			Debug.Log($"[CharSelect] OnStartClicked → 미구현 캐릭터 \"{selected.displayName}\" ({selected.characterType}) 팝업 표시");
 			ShowUnavailablePopup(selected.unavailableMessage);
 			return;
 		}
 
+		Debug.Log($"[CharSelect] OnStartClicked → \"{selected.displayName}\" ({selected.characterType}) 선택 확정 → {GameSceneName}");
 		CharacterSelectionContext.SelectedCharacter = selected.characterType;
+		GameSessionManager.StartNewGame(selected.characterType);
 		SceneManager.LoadScene(GameSceneName);
 	}
 
 	/// <summary>뒤로 버튼에 연결. 메인메뉴로 복귀.</summary>
 	public void OnBackClicked()
 	{
+		Debug.Log("[CharSelect] OnBackClicked → MainMenu");
 		SceneManager.LoadScene(MainMenuSceneName);
 	}
 
@@ -110,6 +121,7 @@ public class CharacterSelectController : MonoBehaviour
 
 		UpdateInfoTexts(data);
 		UpdatePreview(data);
+		UpdateRulesPanel(data);
 	}
 
 	private void UpdateInfoTexts(CharacterData data)
@@ -159,6 +171,44 @@ public class CharacterSelectController : MonoBehaviour
 		{
 			previewFallbackImage.sprite = null;
 			previewFallbackImage.color = data.previewFallbackColor;
+		}
+	}
+
+	private static readonly string DiceRulesBody = string.Join("\n", new[]
+	{
+		"5개의 주사위를 굴려",
+		"눈의 합으로 데미지를 준다.",
+		"",
+		"<color=#FFD94A>족보를 맞추면</color>",
+		"<color=#FFD94A>고정 데미지 + 광역 50%!</color>",
+		"",
+		"<color=#AAAAAA>· Small Straight</color>  4연속",
+		"<color=#AAAAAA>· Full House</color>  2+3",
+		"<color=#AAAAAA>· Large Straight</color>  5연속",
+		"<color=#AAAAAA>· 4 of a Kind</color>  4개 동일",
+		"<color=#FFD94A>· YACHT</color>  5개 동일!",
+	});
+
+	private void UpdateRulesPanel(CharacterData data)
+	{
+		if (rulesTitle == null)
+			return;
+
+		if (data.isAvailable)
+		{
+			rulesTitle.text = "주사위 전투 규칙";
+			if (rulesBody != null)
+				rulesBody.text = DiceRulesBody;
+			if (rulesDetailButton != null)
+				rulesDetailButton.SetActive(true);
+		}
+		else
+		{
+			rulesTitle.text = "전투 규칙";
+			if (rulesBody != null)
+				rulesBody.text = "\n\n<color=#AAAAAA>개발예정</color>";
+			if (rulesDetailButton != null)
+				rulesDetailButton.SetActive(false);
 		}
 	}
 }
