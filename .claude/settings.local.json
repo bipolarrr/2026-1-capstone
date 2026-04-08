@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "allow": [
+      "*",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(ls *.csproj)",
+      "Bash(ls Assembly-CSharp*.csproj)",
+      "Bash(dotnet build:*)",
+      "Bash(dir grok_video_to_sprite/)",
+      "Bash(python clean.py idle_transparent)",
+      "Bash(python upscale.py idle_transparent_clean 2)",
+      "Bash(ls:*)",
+      "Bash(python extract_frames.py dice_roll.mp4)",
+      "Bash(python extract_frames.py die.mp4)",
+      "Bash(python remove_bg.py dice_roll)",
+      "Bash(python remove_bg.py die)",
+      "Bash(wait)",
+      "Bash(python clean.py die_transparent)",
+      "Bash(python upscale.py die_transparent_clean 2)",
+      "Bash(mkdir -p \"C:/Users/song/Desktop/Capstone/Assets/Player/IdleSprites\")",
+      "Bash(cp \"C:/Users/song/Desktop/Capstone/grok_video_to_sprite/idle_transparent_clean_x2/\"*.png \"C:/Users/song/Desktop/Capstone/Assets/Player/IdleSprites/\")",
+      "Bash(python3 -c \"from PIL import Image; img = Image.open\\('C:/Users/song/Desktop/Capstone/grok_video_to_sprite/idle_transparent_clean_x2/0.png'\\); print\\(img.size\\)\")",
+      "Bash(identify \"C:/Users/song/Desktop/Capstone/grok_video_to_sprite/idle_transparent_clean_x2/0.png\")",
+      "Bash(python3 -c \"from PIL import Image; print\\('pillow ok'\\)\")",
+      "Bash(python -c \"from PIL import Image; print\\('pillow ok'\\)\")",
+      "Bash(python:*)",
+      "Bash(wc:*)",
+      "Bash(python3 -c \"from PIL import Image; img = Image.open\\('/c/Users/song/desktop/Capstone/grok_video_to_sprite/die_transparent_clean/0.png'\\); print\\(img.size, img.mode\\)\")",
+      "Bash(mkdir -p \"C:/Users/song/desktop/capstone/Assets/Player/DieSprites\")",
+      "Bash(cp \"C:/Users/song/desktop/Capstone/grok_video_to_sprite/die_transparent_clean/\"*.png \"C:/Users/song/desktop/capstone/Assets/Player/DieSprites/\")"
+    ],
+    "ask": [
+      "Bash(git:*)",
+      "Bash(gh:*)",
+      "Bash(rm:*)",
+      "Bash(rmdir:*)",
+      "Bash(del:*)",
+      "Bash(rd:*)"
+    ]
+  }
+}

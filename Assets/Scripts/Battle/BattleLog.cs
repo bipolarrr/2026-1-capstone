@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using System.Collections;
 
 /// <summary>
 /// 전투 로그 패널. 스크롤 가능한 텍스트 영역에 전투 이벤트를 누적 표시.
@@ -35,18 +36,26 @@ public class BattleLog : MonoBehaviour
 				logText.text = logText.text.Substring(cutIdx + 1);
 		}
 
-		// 다음 프레임에 스크롤을 맨 아래로
+		// 다음 프레임에 스크롤을 맨 아래로 (중복 방지)
 		if (scrollRect != null)
-			StartCoroutine(ScrollToBottom());
+		{
+			if (scrollCoroutine != null)
+				StopCoroutine(scrollCoroutine);
+			scrollCoroutine = StartCoroutine(ScrollToBottom());
+		}
 	}
+
+	Coroutine scrollCoroutine;
 
 	System.Collections.IEnumerator ScrollToBottom()
 	{
 		// TMP 텍스트 갱신 → 레이아웃 리빌드 → 스크롤 적용에 2프레임 필요
 		yield return null;
 		yield return null;
+		LayoutRebuilder.ForceRebuildLayoutImmediate(scrollRect.content);
 		Canvas.ForceUpdateCanvases();
 		scrollRect.verticalNormalizedPosition = 0f;
+		scrollCoroutine = null;
 	}
 
 	public void Clear()

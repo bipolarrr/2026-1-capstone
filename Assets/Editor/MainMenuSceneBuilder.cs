@@ -3,7 +3,6 @@
 // 씬이 이미 존재하면 덮어쓸지 물어봅니다.
 
 using System.IO;
-using System.Reflection;
 using UnityEditor;
 using UnityEditor.Events;
 using UnityEditor.SceneManagement;
@@ -12,6 +11,7 @@ using UnityEngine.UI;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem.UI;
 using TMPro;
+using SBU = SceneBuilderUtility;
 
 public static class MainMenuSceneBuilder
 {
@@ -108,11 +108,11 @@ public static class MainMenuSceneBuilder
 		var creditsButton = CreateMenuButton(menuButtons.transform, "CreditsButton", "✦  Credits");
 
 		// ── SettingsPopup ────────────────────────────────────────────
-		var settingsDimmer = CreateDimmer(canvasObject.transform, "SettingsDimmer");
+		var settingsDimmer = SBU.CreateDimmer(canvasObject.transform, "SettingsDimmer");
 		var settingsPopup = BuildSettingsPopup(canvasObject.transform);
 		SetPrivateField(settingsPopup.GetComponent<SimplePopup>(), "dimmer", settingsDimmer.GetComponent<Image>());
 		// ── CreditsPopup ─────────────────────────────────────────────
-		var creditsDimmer = CreateDimmer(canvasObject.transform, "CreditsDimmer");
+		var creditsDimmer = SBU.CreateDimmer(canvasObject.transform, "CreditsDimmer");
 		var creditsPopup = BuildCreditsPopup(canvasObject.transform);
 		SetPrivateField(creditsPopup.GetComponent<SimplePopup>(), "dimmer", creditsDimmer.GetComponent<Image>());
 
@@ -161,97 +161,37 @@ public static class MainMenuSceneBuilder
 	//  헬퍼 메서드
 	// ─────────────────────────────────────────────────────────────────
 
-	private static GameObject CreateUIPanel(Transform parent, string name, Color color)
-	{
-		var panel = new GameObject(name);
-		var rect = panel.AddComponent<RectTransform>();
-		rect.SetParent(parent, false);
-		var image = panel.AddComponent<Image>();
-		image.color = color;
-		return panel;
-	}
-
 	private static void SetStretch(GameObject target)
-		=> SceneBuilderUtility.Stretch(target.GetComponent<RectTransform>());
-
-private const string FontRegularPath = "Assets/TextMesh Pro/Fonts/Mona12.asset";
-	private const string FontBoldPath    = "Assets/TextMesh Pro/Fonts/Mona12-Bold.asset";
-
-	private static TMP_FontAsset LoadFont(FontStyles style)
-	{
-		var font = AssetDatabase.LoadAssetAtPath<TMP_FontAsset>(FontRegularPath);
-		if (font == null)
-			Debug.LogWarning($"[MainMenuSceneBuilder] 폰트 에셋을 찾을 수 없습니다: {FontRegularPath}");
-		return font;
-	}
-
-	private static GameObject CreateTMPText(Transform parent, string name, string text, float size, FontStyles style, Color color)
-	{
-		var font = LoadFont(style);
-
-		var textObject = new GameObject(name);
-		var rect = textObject.AddComponent<RectTransform>();
-		rect.SetParent(parent, false);
-		var textComponent = textObject.AddComponent<TextMeshProUGUI>();
-		if (font != null)
-			textComponent.font = font;
-		textComponent.text = text;
-		textComponent.fontSize = size;
-		textComponent.fontStyle = style;
-		textComponent.color = color;
-		textComponent.textWrappingMode = TextWrappingModes.NoWrap;
-		return textObject;
-	}
+		=> SBU.Stretch(target.GetComponent<RectTransform>());
 
 	private static GameObject CreateMenuButton(Transform parent, string name, string label)
 	{
-		// 버튼 배경 패널
-		var buttonObject = new GameObject(name);
-		var rect = buttonObject.AddComponent<RectTransform>();
-		rect.SetParent(parent, false);
-
-		var backgroundImage = buttonObject.AddComponent<Image>();
-		backgroundImage.color = new Color(0.15f, 0.18f, 0.35f, 0.9f);
-
-		var button = buttonObject.AddComponent<Button>();
-		var colors = button.colors;
-		colors.normalColor = new Color(0.15f, 0.18f, 0.35f, 0.9f);
-		colors.highlightedColor = new Color(0.28f, 0.35f, 0.70f, 1f);
-		colors.pressedColor = new Color(0.10f, 0.12f, 0.25f, 1f);
-		colors.selectedColor = new Color(0.28f, 0.35f, 0.70f, 1f);
-		button.colors = colors;
-		button.targetGraphic = backgroundImage;
-
-		// 레이블
-		var labelObject = CreateTMPText(buttonObject.transform, "Label", label,
-			64, FontStyles.Bold, new Color(0.92f, 0.92f, 1f, 1f));
-		SetStretch(labelObject);
-		var labelText = labelObject.GetComponent<TMP_Text>();
+		var go = SBU.CreateButton(parent, name, label,
+			64, SBU.ButtonNormal, SBU.ButtonHighlight, SBU.ButtonPressed);
+		var labelText = go.GetComponentInChildren<TMP_Text>();
 		labelText.alignment = TextAlignmentOptions.MidlineLeft;
-		var labelRect = labelObject.GetComponent<RectTransform>();
+		var labelRect = labelText.GetComponent<RectTransform>();
 		labelRect.offsetMin = new Vector2(24, 0);
 		labelRect.offsetMax = new Vector2(-8, 0);
-
-		return buttonObject;
+		return go;
 	}
 
 	private static GameObject BuildSettingsPopup(Transform canvasParent)
 	{
-		var settingsPopup = CreateUIPanel(canvasParent, "SettingsPopup",
+		var settingsPopup = SBU.CreateUIPanel(canvasParent, "SettingsPopup",
 			new Color(0.08f, 0.09f, 0.18f, 0.97f));
 		CenterPopup(settingsPopup, 520, 400);
 		settingsPopup.AddComponent<SimplePopup>();
 		settingsPopup.AddComponent<SettingsPopupController>();
 
 		// 제목
-		var title = CreateTMPText(settingsPopup.transform, "Title", "Settings",
-			40, FontStyles.Bold, Color.white);
+		var title = SBU.CreateTMPText(settingsPopup.transform, "Title", "Settings",
+			40, Color.white, TextAlignmentOptions.Center, FontStyles.Bold);
 		var titleRect = title.GetComponent<RectTransform>();
 		titleRect.anchorMin = new Vector2(0, 0.78f);
 		titleRect.anchorMax = new Vector2(1, 1f);
 		titleRect.offsetMin = Vector2.zero;
 		titleRect.offsetMax = Vector2.zero;
-		title.GetComponent<TMP_Text>().alignment = TextAlignmentOptions.Center;
 
 		// BGM 슬라이더 행
 		var bgmRow = BuildSliderRow(settingsPopup.transform, "BGM Volume", 0.52f, 0.70f);
@@ -297,14 +237,13 @@ private const string FontRegularPath = "Assets/TextMesh Pro/Fonts/Mona12.asset";
 		rowRect.offsetMin = Vector2.zero;
 		rowRect.offsetMax = Vector2.zero;
 
-		var labelObject = CreateTMPText(row.transform, "Label", label,
-			24, FontStyles.Normal, new Color(0.8f, 0.8f, 1f, 1f));
-		var labelRect = labelObject.GetComponent<RectTransform>();
+		var labelTmp = SBU.CreateTMPText(row.transform, "Label", label,
+			24, new Color(0.8f, 0.8f, 1f, 1f), TextAlignmentOptions.MidlineLeft);
+		var labelRect = labelTmp.GetComponent<RectTransform>();
 		labelRect.anchorMin = new Vector2(0, 0.5f);
 		labelRect.anchorMax = new Vector2(0.38f, 1f);
 		labelRect.offsetMin = Vector2.zero;
 		labelRect.offsetMax = Vector2.zero;
-		labelObject.GetComponent<TMP_Text>().alignment = TextAlignmentOptions.MidlineLeft;
 
 		// Slider
 		var sliderObject = new GameObject("Slider");
@@ -362,25 +301,24 @@ private const string FontRegularPath = "Assets/TextMesh Pro/Fonts/Mona12.asset";
 		slider.value = 0.8f;
 
 		// 값 레이블
-		var valueLabel = CreateTMPText(row.transform, "ValueLabel", "80%",
-			22, FontStyles.Normal, new Color(0.7f, 0.9f, 1f, 1f));
-		var valueLabelRect = valueLabel.GetComponent<RectTransform>();
+		var valueLabelTmp = SBU.CreateTMPText(row.transform, "ValueLabel", "80%",
+			22, new Color(0.7f, 0.9f, 1f, 1f), TextAlignmentOptions.Midline);
+		var valueLabelRect = valueLabelTmp.GetComponent<RectTransform>();
 		valueLabelRect.anchorMin = new Vector2(0.87f, 0f);
 		valueLabelRect.anchorMax = new Vector2(1f, 1f);
 		valueLabelRect.offsetMin = Vector2.zero;
 		valueLabelRect.offsetMax = Vector2.zero;
-		valueLabel.GetComponent<TMP_Text>().alignment = TextAlignmentOptions.Midline;
 
 		return new SliderRowResult
 		{
 			Slider = slider,
-			ValueLabel = valueLabel.GetComponent<TMP_Text>()
+			ValueLabel = valueLabelTmp
 		};
 	}
 
 	private static GameObject BuildCreditsPopup(Transform canvasParent)
 	{
-		var creditsPopup = CreateUIPanel(canvasParent, "CreditsPopup",
+		var creditsPopup = SBU.CreateUIPanel(canvasParent, "CreditsPopup",
 			new Color(0.08f, 0.09f, 0.18f, 0.97f));
 		CenterPopup(creditsPopup, 480, 360);
 		creditsPopup.AddComponent<SimplePopup>();
@@ -395,16 +333,15 @@ private const string FontRegularPath = "Assets/TextMesh Pro/Fonts/Mona12.asset";
 			"",
 			"<size=20><color=#6677aa>© 2026 All rights reserved.</color></size>"
 		};
-		var creditsTextObject = CreateTMPText(creditsPopup.transform, "CreditsText",
+		var creditsTmp = SBU.CreateTMPText(creditsPopup.transform, "CreditsText",
 			string.Join("\n", bodyLines),
-			28, FontStyles.Normal, Color.white);
-		var creditsTextRect = creditsTextObject.GetComponent<RectTransform>();
+			28, Color.white, TextAlignmentOptions.Center);
+		creditsTmp.textWrappingMode = TextWrappingModes.Normal;
+		var creditsTextRect = creditsTmp.GetComponent<RectTransform>();
 		creditsTextRect.anchorMin = new Vector2(0.05f, 0.22f);
 		creditsTextRect.anchorMax = new Vector2(0.95f, 0.96f);
 		creditsTextRect.offsetMin = Vector2.zero;
 		creditsTextRect.offsetMax = Vector2.zero;
-		creditsTextObject.GetComponent<TMP_Text>().alignment = TextAlignmentOptions.Center;
-		creditsTextObject.GetComponent<TMP_Text>().textWrappingMode = TextWrappingModes.Normal;
 
 		var closeButton = CreateMenuButton(creditsPopup.transform, "CloseButton", "✕  Close");
 		closeButton.GetComponentInChildren<TMP_Text>().fontSize = 28;
@@ -420,29 +357,11 @@ private const string FontRegularPath = "Assets/TextMesh Pro/Fonts/Mona12.asset";
 		return creditsPopup;
 	}
 
-	private static GameObject CreateDimmer(Transform canvasParent, string name)
-	{
-		var dimmer = new GameObject(name);
-		var rect = dimmer.AddComponent<RectTransform>();
-		rect.SetParent(canvasParent, false);
-		rect.anchorMin = Vector2.zero;
-		rect.anchorMax = Vector2.one;
-		rect.offsetMin = Vector2.zero;
-		rect.offsetMax = Vector2.zero;
-
-		var image = dimmer.AddComponent<Image>();
-		image.color = new Color(0f, 0f, 0f, 0f);
-		image.raycastTarget = true;
-
-		dimmer.SetActive(false);
-		return dimmer;
-	}
-
 	private static void CenterPopup(GameObject target, float width, float height)
-		=> SceneBuilderUtility.CenterPopup(target, width, height);
+		=> SBU.CenterPopup(target, width, height);
 
 	private static void SetPrivateField(object target, string fieldName, object value)
-		=> SceneBuilderUtility.SetField(target, fieldName, value);
+		=> SBU.SetField(target, fieldName, value);
 
 	private static void AddSceneToBuildSettings(string path)
 	{

@@ -3,13 +3,12 @@ using UnityEngine;
 
 /// <summary>
 /// 게임 전반에서 유지되는 정적 매니저.
-/// 캐릭터 선택, 플레이어 체력, 파워업, 전투 컨텍스트를 관리한다.
+/// 캐릭터 선택, 플레이어 체력(하트), 파워업, 전투 컨텍스트를 관리한다.
 /// </summary>
 public static class GameSessionManager
 {
 	public static CharacterType SelectedCharacter;
-	public static int PlayerMaxHp = 25;
-	public static int PlayerHp;
+	public static HeartContainer PlayerHearts = new HeartContainer();
 	public static List<PowerUpType> PowerUps = new List<PowerUpType>();
 
 	public static int CurrentEventIndex;
@@ -21,20 +20,21 @@ public static class GameSessionManager
 	// ── 전투 결과 (전투 씬이 설정, 탐험 씬이 읽음) ──
 	public static BattleResult LastBattleResult = BattleResult.None;
 
-	// 보스: ATK 6, HP 120 → 25÷6 ≈ 4라운드 생존, 120÷25(콤보 평균) ≈ 5라운드 필요
-	// ReviveOnce로 +3~4라운드 → 생각하면 클리어 가능
+	// 보스 HP (적 체력이므로 하트와 무관)
 	public static int BossHp = 120;
+
+	public static bool IsPlayerAlive => PlayerHearts.IsAlive;
 
 	public static void StartNewGame(CharacterType character)
 	{
 		SelectedCharacter = character;
-		PlayerHp = PlayerMaxHp;
+		PlayerHearts.Reset();
 		PowerUps.Clear();
 		CurrentEventIndex = 0;
 		BattleEnemies.Clear();
 		LastBattleResult = BattleResult.None;
 		IsBossBattle = false;
-		Debug.Log($"[Session] StartNewGame character={character} hp={PlayerHp}");
+		Debug.Log($"[Session] StartNewGame character={character} hearts={PlayerHearts.TotalHalfHearts}");
 	}
 
 	public static bool HasPowerUp(PowerUpType type)
@@ -48,19 +48,19 @@ public static class GameSessionManager
 	}
 
 	/// <summary>
-	/// 플레이어 피해 처리. ReviveOnce 패시브가 있으면 치명타 1회 무효화.
+	/// 플레이어 피해 처리 (반칸 단위). ReviveOnce 패시브가 있으면 치명타 1회 무효화.
 	/// </summary>
-	public static bool TakePlayerDamage(int damage)
+	public static bool TakePlayerDamage(int halfHearts)
 	{
-		if (damage >= PlayerHp && HasPowerUp(PowerUpType.ReviveOnce))
+		if (halfHearts >= PlayerHearts.TotalHalfHearts && HasPowerUp(PowerUpType.ReviveOnce))
 		{
-			Debug.Log($"[Session] ReviveOnce 발동: damage={damage} hp={PlayerHp} → ���효화");
+			Debug.Log($"[Session] ReviveOnce 발동: damage={halfHearts} hearts={PlayerHearts.TotalHalfHearts} → 무효화");
 			RemovePowerUp(PowerUpType.ReviveOnce);
 			return true;
 		}
-		int before = PlayerHp;
-		PlayerHp = Mathf.Max(0, PlayerHp - damage);
-		Debug.Log($"[Session] TakePlayerDamage damage={damage} hp={before}→{PlayerHp}");
+		int before = PlayerHearts.TotalHalfHearts;
+		PlayerHearts.TakeDamage(halfHearts);
+		Debug.Log($"[Session] TakePlayerDamage halfHearts={halfHearts} hearts={before}→{PlayerHearts.TotalHalfHearts}");
 		return false;
 	}
 }

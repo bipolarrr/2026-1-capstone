@@ -8,8 +8,7 @@ using TMPro;
 public class GameExploreController : MonoBehaviour
 {
 	// ── HUD ──
-	[SerializeField] Image playerHpFill;
-	[SerializeField] TMP_Text playerHpText;
+	[SerializeField] HeartDisplay heartDisplay;
 	[SerializeField] TMP_Text powerUpText;
 
 	// ── 이동 연출 ──
@@ -96,9 +95,9 @@ public class GameExploreController : MonoBehaviour
 	void Start()
 	{
 		// StartNewGame를 거치지 않고 직접 씬을 열었거나, 신규 게임 시작 시 HP 보장
-		if (GameSessionManager.PlayerHp <= 0
+		if (!GameSessionManager.IsPlayerAlive
 			|| (GameSessionManager.CurrentEventIndex == 0 && GameSessionManager.LastBattleResult == BattleResult.None))
-			GameSessionManager.PlayerHp = GameSessionManager.PlayerMaxHp;
+			GameSessionManager.PlayerHearts.Reset();
 
 		ShowPanel(encounterPanel, false);
 		ShowPanel(combatGroup, false);
@@ -108,7 +107,7 @@ public class GameExploreController : MonoBehaviour
 		playerBasePos = playerBody.rectTransform.anchoredPosition;
 		UpdateHUD();
 
-		Debug.Log($"[Explore] Start lastBattle={GameSessionManager.LastBattleResult} eventIdx={GameSessionManager.CurrentEventIndex} hp={GameSessionManager.PlayerHp}");
+		Debug.Log($"[Explore] Start lastBattle={GameSessionManager.LastBattleResult} eventIdx={GameSessionManager.CurrentEventIndex} hearts={GameSessionManager.PlayerHearts.TotalHalfHearts}");
 
 		// CurrentEventIndex 증가는 이 씬에서 일원화: 전투 승리, 아이템 선택 모두 여기서 처리
 		switch (GameSessionManager.LastBattleResult)
@@ -235,7 +234,7 @@ public class GameExploreController : MonoBehaviour
 			{
 				GameSessionManager.BattleEnemies.Clear();
 				GameSessionManager.BattleEnemies.Add(
-					new EnemyInfo("어둠의 지배자", GameSessionManager.BossHp, 6,
+					new EnemyInfo("어둠의 지배자", GameSessionManager.BossHp, 5,
 						new Color(0.95f, 0.45f, 0.45f), bossSprite));
 			}
 		}
@@ -249,19 +248,15 @@ public class GameExploreController : MonoBehaviour
 		RefreshEnemySlots();
 	}
 
-	// ── 몹 밸런스 (플레이어 HP 25 기준) ──
-	// 설계 근거:
-	//   무족보 평균 데미지 = 5 × 3.5 = 17.5/라운드
-	//   3적 ATK 합계 ~11 → 25÷11 ≈ 2.3라운드 생존
-	//   박쥐 1라운드 처치 시 ATK ~5로 감소 → 추가 4라운드 생존
-	//   탱커 슬라임은 2~3라운드 필요 → 총 4~5라운드 전투
-	//   → 딜러 우선 처치가 생존의 핵심
-	static readonly (int hpMin, int hpMax, int atkMin, int atkMax)[] MobStatPool =
+	// ── 몹 밸런스 (하트 5개 = 10반칸 기준) ──
+	// rank × 1반칸 = 기본 데미지, 족보 시 배율 증가
+	// 슬라임 rank1=1반칸, 박쥐 rank3=3반칸 → 고랭크 먼저 잡는 것이 핵심
+	static readonly (int hpMin, int hpMax, int rank)[] MobStatPool =
 	{
-		(30, 40, 1, 2),   // 슬라임: 탱커 — HP 높고 ATK 낮음, 나중에 잡아도 됨
-		(18, 25, 3, 4),   // 고블린: 밸런스 — 적당한 위협
-		(10, 15, 5, 7),   // 박쥐: 딜러 — HP 낮지만 안 잡으면 매 라운드 큰 피해
-		(22, 30, 2, 3),   // 해골: 서브탱커 — 슬라임보다 약간 빠르게 처리 가능
+		(30, 40, 1),   // 슬라임: 탱커 — HP 높고 rank 낮음
+		(18, 25, 2),   // 고블린: 밸런스
+		(10, 15, 3),   // 박쥐: 딜러 — HP 낮지만 rank 높음
+		(22, 30, 2),   // 해골: 서브탱커
 	};
 
 	void GenerateNormalEnemies()
@@ -272,12 +267,11 @@ public class GameExploreController : MonoBehaviour
 		{
 			var stat = MobStatPool[i];
 			int hp = Random.Range(stat.hpMin, stat.hpMax + 1);
-			int atk = Random.Range(stat.atkMin, stat.atkMax + 1);
 			Sprite spr = (mobSprites != null && i < mobSprites.Length) ? mobSprites[i] : null;
 			GameSessionManager.BattleEnemies.Add(
-				new EnemyInfo(MobNames[i], hp, atk, MobColors[i], spr));
+				new EnemyInfo(MobNames[i], hp, stat.rank, MobColors[i], spr));
 		}
-		Debug.Log($"[Explore] GenerateNormalEnemies count={count} stats=[{string.Join(",", GameSessionManager.BattleEnemies.ConvertAll(e => $"{e.name}(hp{e.hp} atk{e.attack})"))}]");
+		Debug.Log($"[Explore] GenerateNormalEnemies count={count} stats=[{string.Join(",", GameSessionManager.BattleEnemies.ConvertAll(e => $"{e.name}(hp{e.hp} rank{e.rank})"))}]");
 	}
 
 	/// <summary>싸운다 버튼 — 전투 컨텍스트만 설정하고 BattleScene으로 진입</summary>
@@ -324,9 +318,9 @@ public class GameExploreController : MonoBehaviour
 					enemyBodies[i].color = enemies[i].color;
 					enemyBodies[i].preserveAspect = false;
 				}
-				enemyNames[i].gameObject.SetActive(false);
+				enemyNames[i].transform.parent.gameObject.SetActive(false);
 				enemyHpFills[i].fillAmount = (float)enemies[i].hp / enemies[i].maxHp;
-				enemyHpTexts[i].text = $"HP {enemies[i].hp}  <color=#FF6666>ATK {enemies[i].attack}</color>";
+				enemyHpTexts[i].text = $"HP {enemies[i].hp}  <color=#FFD94A>{enemies[i].RankStars}</color>";
 
 				// 슬롯 배치
 				var rt = enemySlots[i].GetComponent<RectTransform>();
@@ -410,7 +404,7 @@ public class GameExploreController : MonoBehaviour
 
 	void ShowVictory()
 	{
-		Debug.Log($"[Explore] ShowVictory hp={GameSessionManager.PlayerHp} powerUps={GameSessionManager.PowerUps.Count}");
+		Debug.Log($"[Explore] ShowVictory hearts={GameSessionManager.PlayerHearts.TotalHalfHearts} powerUps={GameSessionManager.PowerUps.Count}");
 		state = ExploreState.Encounter;
 		ShowPanel(encounterPanel, false);
 		ShowPanel(victoryPanel, true);
@@ -424,9 +418,8 @@ public class GameExploreController : MonoBehaviour
 
 	void UpdateHUD()
 	{
-		float ratio = (float)GameSessionManager.PlayerHp / GameSessionManager.PlayerMaxHp;
-		playerHpFill.fillAmount = ratio;
-		playerHpText.text = $"{GameSessionManager.PlayerHp} / {GameSessionManager.PlayerMaxHp}";
+		if (heartDisplay != null)
+			heartDisplay.Refresh(GameSessionManager.PlayerHearts);
 
 		var pups = GameSessionManager.PowerUps;
 		if (pups.Count == 0)

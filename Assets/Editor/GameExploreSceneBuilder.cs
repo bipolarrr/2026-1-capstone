@@ -4,18 +4,13 @@ using UnityEditor.SceneManagement;
 using UnityEngine.UI;
 using UnityEngine.SceneManagement;
 using TMPro;
-using System.Reflection;
 using UnityEditor.Events;
 
 public static class GameExploreSceneBuilder
 {
 	// ── 색상 팔레트 ──
 	static readonly Color BgColor = new Color(0.10f, 0.10f, 0.18f);
-	static readonly Color GroundColor = new Color(0.18f, 0.28f, 0.16f);
 	static readonly Color PanelBg = new Color(0.12f, 0.12f, 0.22f, 0.95f);
-	static readonly Color ButtonNormal = new Color(0.15f, 0.18f, 0.35f, 0.9f);
-	static readonly Color ButtonHighlight = new Color(0.28f, 0.35f, 0.70f, 1f);
-	static readonly Color ButtonPressed = new Color(0.10f, 0.12f, 0.25f, 1f);
 	static readonly Color PlayerColor = new Color(0.55f, 0.85f, 0.65f);
 	static readonly Color AccentYellow = new Color(1f, 0.85f, 0.3f);
 	static readonly Color HpBarBg = new Color(0.15f, 0.15f, 0.15f);
@@ -49,42 +44,64 @@ public static class GameExploreSceneBuilder
 		canvasGo.AddComponent<GraphicRaycaster>();
 
 		// ── 배경 ──
-		var bg = CreateImage(canvasGo, "Background", BgColor);
-		Stretch(bg);
+		// 마스크 컨테이너: 전체 화면을 덮되 이미지는 하단 기준으로 배치 → 위쪽이 잘려 하단부만 보임
+		var bgMask = CreateEmpty(canvasGo, "BackgroundMask");
+		Stretch(bgMask);
+		bgMask.gameObject.AddComponent<RectMask2D>();
 
-		var ground = CreateImage(canvasGo, "Ground", GroundColor);
-		SetAnchors(ground, 0f, 0f, 1f, 0.18f);
-		ground.offsetMin = Vector2.zero;
-		ground.offsetMax = Vector2.zero;
+		var bgImg = CreateImage(bgMask.gameObject, "Background", Color.white);
+		var fightBgTex = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Mobs/Fight_Background.png");
+		float bgAspect = fightBgTex != null ? (float)fightBgTex.width / fightBgTex.height : 16f / 9f;
+		float bgImgHeight = 1920f / bgAspect;
+		bgImg.anchorMin = new Vector2(0f, 0f);
+		bgImg.anchorMax = new Vector2(1f, 0f);
+		bgImg.pivot = new Vector2(0.5f, 0f);
+		bgImg.offsetMin = new Vector2(0f, 0f);
+		bgImg.offsetMax = new Vector2(0f, bgImgHeight);
+		var bgSprite = AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Mobs/Fight_Background.png");
+		if (bgSprite != null)
+			bgImg.GetComponent<Image>().sprite = bgSprite;
+		else
+			bgImg.GetComponent<Image>().color = BgColor;
 
-		// ── 스크롤 장식 ──
-		var scrollRoot = CreateEmpty(canvasGo, "ScrollingRoot");
-		Stretch(scrollRoot);
-		BuildScrollingDecorations(scrollRoot.gameObject);
+		// ── 지면 기준선 (배경 흙길 높이) ──
+		const float GroundY = 0.12f;
+		var groundLine = CreateEmpty(canvasGo, "GroundLine");
+		groundLine.anchorMin = new Vector2(0f, GroundY);
+		groundLine.anchorMax = new Vector2(1f, GroundY);
+		groundLine.offsetMin = Vector2.zero;
+		groundLine.offsetMax = Vector2.zero;
 
-		// ── 플레이어 캐릭터 ──
-		string playerSpritePath = "Assets/Mobs/DiceGambler_sample.png";
-		EnsureTightSprite(playerSpritePath);
-		var playerSprite = AssetDatabase.LoadAssetAtPath<Sprite>(playerSpritePath);
+		// ── 플레이어 캐릭터 (정적 스프라이트 + 호흡 애니메이션) ──
+		string idlePath = "Assets/Player/IdleSprites/0.png";
+		EnsurePixelSprite(idlePath);
+		Sprite idleSprite = AssetDatabase.LoadAssetAtPath<Sprite>(idlePath);
 
 		var playerBody = CreateImage(canvasGo, "PlayerBody", Color.white);
-		playerBody.anchorMin = new Vector2(0.15f, 0.18f);
-		playerBody.anchorMax = new Vector2(0.23f, 0.42f);
-		playerBody.offsetMin = Vector2.zero;
-		playerBody.offsetMax = Vector2.zero;
+		playerBody.pivot = new Vector2(0.5f, 0f);               // 피벗 하단 → 발 기준 배치
+		playerBody.anchorMin = new Vector2(0.19f, GroundY);      // 단일 앵커점 (지면)
+		playerBody.anchorMax = new Vector2(0.19f, GroundY);
+		playerBody.sizeDelta = new Vector2(150f, 150f);          // 기본 크기 (px)
+		playerBody.localScale = new Vector3(2f, 2f, 1f);        // 스케일 2배
+		playerBody.localEulerAngles = new Vector3(0f, 180f, 0f); // 좌우 반전 (Y축 회전)
 		var playerImg = playerBody.GetComponent<Image>();
-		if (playerSprite != null)
-		{
-			playerImg.sprite = playerSprite;
-			playerImg.preserveAspect = true;
-			playerImg.useSpriteMesh = true;
-		}
+		playerImg.preserveAspect = true;
+		playerImg.useSpriteMesh = false;
+		if (idleSprite != null)
+			playerImg.sprite = idleSprite;
 
-		var playerNameTxt = CreateTMPText(canvasGo, "PlayerName", "도박꾼",
-			30, DarkerColor(PlayerColor), TextAlignmentOptions.Center);
+		// SpriteAnimator: Y축 스케일 호흡 애니메이션
+		var spriteAnim = playerBody.gameObject.AddComponent<SpriteAnimator>();
+		SetField(spriteAnim, "amplitude", 0.03f);
+		SetField(spriteAnim, "speed", 2f);
+
+		var playerNameTxt = CreateTMPText(canvasGo, "PlayerName", "다람쥐(주사위)",
+			30, Color.white, TextAlignmentOptions.Center);
+		var playerNameTmpUGUI = playerNameTxt as TextMeshProUGUI;
+		playerNameTmpUGUI.fontSharedMaterial = GetOrCreateOutlineMaterial(playerNameTmpUGUI.font);
 		var pnRt = playerNameTxt.GetComponent<RectTransform>();
-		pnRt.anchorMin = new Vector2(0.12f, 0.43f);
-		pnRt.anchorMax = new Vector2(0.26f, 0.48f);
+		pnRt.anchorMin = new Vector2(0.10f, GroundY + 0.22f);   // 머리 바로 위
+		pnRt.anchorMax = new Vector2(0.28f, GroundY + 0.27f);
 		pnRt.offsetMin = Vector2.zero;
 		pnRt.offsetMax = Vector2.zero;
 
@@ -92,24 +109,17 @@ public static class GameExploreSceneBuilder
 		var hudParent = CreateEmpty(canvasGo, "HUD");
 		Stretch(hudParent);
 
-		var hpBarBg = CreateImage(hudParent.gameObject, "PlayerHpBarBg", HpBarBg);
-		hpBarBg.anchorMin = new Vector2(0.02f, 0.92f);
-		hpBarBg.anchorMax = new Vector2(0.25f, 0.96f);
-		hpBarBg.offsetMin = Vector2.zero;
-		hpBarBg.offsetMax = Vector2.zero;
+		var heartTextObj = CreateTMPText(hudParent.gameObject, "PlayerHeartText", "● ● ● ● ●",
+			48, new Color(1f, 0.13f, 0.13f), TextAlignmentOptions.Left);
+		heartTextObj.richText = true;
+		var heartRt = heartTextObj.GetComponent<RectTransform>();
+		heartRt.anchorMin = new Vector2(0.02f, 0.86f);
+		heartRt.anchorMax = new Vector2(0.40f, 0.97f);
+		heartRt.offsetMin = Vector2.zero;
+		heartRt.offsetMax = Vector2.zero;
 
-		var hpFill = CreateImage(hpBarBg.gameObject, "PlayerHpFill", HpBarFill);
-		Stretch(hpFill);
-		hpFill.GetComponent<Image>().type = Image.Type.Filled;
-		hpFill.GetComponent<Image>().fillMethod = Image.FillMethod.Horizontal;
-
-		var hpText = CreateTMPText(hudParent.gameObject, "PlayerHpText", "100 / 100",
-			22, Color.white, TextAlignmentOptions.Left);
-		var hpTxtRt = hpText.GetComponent<RectTransform>();
-		hpTxtRt.anchorMin = new Vector2(0.02f, 0.88f);
-		hpTxtRt.anchorMax = new Vector2(0.25f, 0.92f);
-		hpTxtRt.offsetMin = Vector2.zero;
-		hpTxtRt.offsetMax = Vector2.zero;
+		var heartDisplayComp = heartTextObj.gameObject.AddComponent<HeartDisplay>();
+		SetField(heartDisplayComp, "heartText", heartTextObj);
 
 		var pupText = CreateTMPText(hudParent.gameObject, "PowerUpText", "",
 			22, AccentYellow, TextAlignmentOptions.Left);
@@ -146,10 +156,10 @@ public static class GameExploreSceneBuilder
 			new Vector2(0.52f, 0.72f), new Vector2(0.75f, 0.80f));
 		var fleeButton = fleeBtnGo.GetComponent<Button>();
 
-		// 적 스프라이트 (경로 위, 플레이어 앞)
+		// 적 스프라이트 (지면 위, 플레이어 앞)
 		var enemySlotsArea = CreateEmpty(combatGroup.gameObject, "EnemySlotsArea");
-		enemySlotsArea.anchorMin = new Vector2(0.40f, 0.18f);
-		enemySlotsArea.anchorMax = new Vector2(0.90f, 0.50f);
+		enemySlotsArea.anchorMin = new Vector2(0.40f, GroundY);
+		enemySlotsArea.anchorMax = new Vector2(0.90f, GroundY + 0.35f);
 		enemySlotsArea.offsetMin = Vector2.zero;
 		enemySlotsArea.offsetMax = Vector2.zero;
 
@@ -181,15 +191,20 @@ public static class GameExploreSceneBuilder
 			enemyBodies[i] = body.GetComponent<Image>();
 			enemyBodies[i].useSpriteMesh = true;
 
-			// 이름 (바인딩용, 기본 숨김)
-			var nameT = CreateTMPText(slot.gameObject, "Name", "적",
+			// 이름 컨테이너 (반투명 배경 + 텍스트, 기본 숨김)
+			var nameContainer = CreateImage(slot.gameObject, "NameContainer",
+				new Color(0f, 0f, 0f, 0.5f));
+			nameContainer.anchorMin = new Vector2(0.05f, 0.0f);
+			nameContainer.anchorMax = new Vector2(0.95f, 0.12f);
+			nameContainer.offsetMin = Vector2.zero;
+			nameContainer.offsetMax = Vector2.zero;
+			nameContainer.GetComponent<Image>().raycastTarget = false;
+			nameContainer.gameObject.SetActive(false);
+
+			var nameT = CreateTMPText(nameContainer.gameObject, "Name", "적",
 				28, Color.white, TextAlignmentOptions.Center);
 			var nrt = nameT.GetComponent<RectTransform>();
-			nrt.anchorMin = new Vector2(0.05f, 0.0f);
-			nrt.anchorMax = new Vector2(0.95f, 0.12f);
-			nrt.offsetMin = Vector2.zero;
-			nrt.offsetMax = Vector2.zero;
-			nameT.gameObject.SetActive(false);
+			Stretch(nrt);
 			enemyNameTexts[i] = nameT;
 
 			// HP 바 (바인딩용, 기본 숨김)
@@ -346,12 +361,11 @@ public static class GameExploreSceneBuilder
 		var ctrl = root.AddComponent<GameExploreController>();
 
 		// 필드 바인딩
-		SetField(ctrl, "playerHpFill", hpFill.GetComponent<Image>());
-		SetField(ctrl, "playerHpText", hpText);
+		SetField(ctrl, "heartDisplay", heartDisplayComp);
 		SetField(ctrl, "powerUpText", pupText);
 		SetField(ctrl, "playerBody", playerBody.GetComponent<Image>());
 		SetField(ctrl, "playerNameText", playerNameTxt);
-		SetField(ctrl, "scrollingRoot", scrollRoot);
+
 		SetField(ctrl, "encounterPanel", encounterPanelCG);
 		SetField(ctrl, "encounterTitle", encounterTitle);
 		SetField(ctrl, "itemEncounterTitle", itemEncounterTitle);
@@ -400,58 +414,9 @@ public static class GameExploreSceneBuilder
 		EditorUtility.DisplayDialog("씬 빌더", "GameExploreScene 생성 완료!", "확인");
 	}
 
-	// ── 스크롤 장식 생성 ──
+	static void EnsurePixelSprite(string path) => SceneBuilderUtility.EnsurePixelSprite(path);
 
-	static void BuildScrollingDecorations(GameObject parent)
-	{
-		Color treeColor = new Color(0.25f, 0.50f, 0.30f);
-		Color trunkColor = new Color(0.40f, 0.28f, 0.15f);
-
-		for (int i = 0; i < 5; i++)
-		{
-			float x = 0.1f + i * 0.2f;
-
-			// 나무 줄기
-			var trunk = CreateImage(parent, $"Trunk{i}", trunkColor);
-			trunk.anchorMin = new Vector2(x - 0.005f, 0.15f);
-			trunk.anchorMax = new Vector2(x + 0.005f, 0.30f);
-			trunk.offsetMin = Vector2.zero;
-			trunk.offsetMax = Vector2.zero;
-
-			// 나무 관 (원형)
-			var crown = CreateImage(parent, $"Crown{i}", treeColor);
-			crown.anchorMin = new Vector2(x - 0.025f, 0.28f);
-			crown.anchorMax = new Vector2(x + 0.025f, 0.40f);
-			crown.offsetMin = Vector2.zero;
-			crown.offsetMax = Vector2.zero;
-		}
-	}
-
-	// ── 스프라이트 임포트 (Tight 메시로 투명 영역 제거) ──
-
-	static void EnsureTightSprite(string path)
-	{
-		var importer = AssetImporter.GetAtPath(path) as TextureImporter;
-		if (importer == null) return;
-		bool reimport = false;
-		if (importer.textureType != TextureImporterType.Sprite ||
-			importer.spriteImportMode != SpriteImportMode.Single)
-		{
-			importer.textureType = TextureImporterType.Sprite;
-			importer.spriteImportMode = SpriteImportMode.Single;
-			reimport = true;
-		}
-		var settings = new TextureImporterSettings();
-		importer.ReadTextureSettings(settings);
-		if (settings.spriteMeshType != SpriteMeshType.Tight)
-		{
-			settings.spriteMeshType = SpriteMeshType.Tight;
-			importer.SetTextureSettings(settings);
-			reimport = true;
-		}
-		if (reimport)
-			importer.SaveAndReimport();
-	}
+	static void EnsureTightSprite(string path) => SceneBuilderUtility.EnsureTightSprite(path);
 
 	// ── 헬퍼 (유틸리티 위임 + 로컬 전용) ──
 
@@ -479,7 +444,8 @@ public static class GameExploreSceneBuilder
 		Vector2 anchorMin, Vector2 anchorMax)
 	{
 		var go = SceneBuilderUtility.CreateButton(parent.transform, name, label,
-			28, ButtonNormal, ButtonHighlight, ButtonPressed);
+			28, SceneBuilderUtility.ButtonNormal, SceneBuilderUtility.ButtonHighlight,
+			SceneBuilderUtility.ButtonPressed);
 		var rt = go.GetComponent<RectTransform>();
 		rt.anchorMin = anchorMin;
 		rt.anchorMax = anchorMax;
@@ -491,21 +457,26 @@ public static class GameExploreSceneBuilder
 	static void SetButtonColors(Button btn)
 	{
 		var cb = btn.colors;
-		cb.normalColor = ButtonNormal;
-		cb.highlightedColor = ButtonHighlight;
-		cb.pressedColor = ButtonPressed;
-		cb.selectedColor = ButtonHighlight;
+		cb.normalColor = SceneBuilderUtility.ButtonNormal;
+		cb.highlightedColor = SceneBuilderUtility.ButtonHighlight;
+		cb.pressedColor = SceneBuilderUtility.ButtonPressed;
+		cb.selectedColor = SceneBuilderUtility.ButtonHighlight;
 		btn.colors = cb;
 	}
 
-	static void SetAnchors(RectTransform rt, float xMin, float yMin, float xMax, float yMax)
+	static Material GetOrCreateOutlineMaterial(TMP_FontAsset fontAsset)
 	{
-		rt.anchorMin = new Vector2(xMin, yMin);
-		rt.anchorMax = new Vector2(xMax, yMax);
-	}
-
-	static Color DarkerColor(Color c)
-	{
-		return new Color(c.r * 0.5f, c.g * 0.5f, c.b * 0.5f, 1f);
+		string path = "Assets/Materials/Mona12Outline.mat";
+		EnsureDirectory("Assets/Materials");
+		var mat = AssetDatabase.LoadAssetAtPath<Material>(path);
+		if (mat == null)
+		{
+			mat = new Material(fontAsset.material);
+			mat.SetFloat(ShaderUtilities.ID_OutlineWidth, 0.35f);
+			mat.SetColor(ShaderUtilities.ID_OutlineColor, Color.black);
+			AssetDatabase.CreateAsset(mat, path);
+			AssetDatabase.SaveAssets();
+		}
+		return mat;
 	}
 }
