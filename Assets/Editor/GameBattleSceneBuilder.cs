@@ -344,18 +344,13 @@ public static class GameBattleSceneBuilder
 		// 주사위 눈 스프라이트 생성 (1~6)
 		var diceFaceSprites = GenerateDiceFaceSprites();
 
-		// 적 주사위 눈 표시 컨테이너 (각 적 발 밑)
+		// 적 주사위 눈 표시 컨테이너 (각 적 슬롯의 자식 — 패널과 함께 이동)
 		GameObject[] enemyDiceFaceContainers = new GameObject[4];
 		for (int i = 0; i < 4; i++)
 		{
-			float slotX0 = 0.45f + i * 0.25f * 0.50f;
-			float slotX1 = slotX0 + 0.24f * 0.50f;
-			float slotCenterX = (slotX0 + slotX1) * 0.5f;
-			float halfW = 0.07f;
-
-			var container = CreateEmpty(canvasGo, $"EnemyDiceFaces{i}");
-			container.anchorMin = new Vector2(slotCenterX - halfW, GroundY - 0.06f);
-			container.anchorMax = new Vector2(slotCenterX + halfW, GroundY + 0.01f);
+			var container = CreateEmpty(enemyPanels[i], $"EnemyDiceFaces{i}");
+			container.anchorMin = new Vector2(0.05f, -0.12f);
+			container.anchorMax = new Vector2(0.95f, 0.02f);
 			container.offsetMin = Vector2.zero;
 			container.offsetMax = Vector2.zero;
 			var hlg = container.gameObject.AddComponent<HorizontalLayoutGroup>();
@@ -712,6 +707,9 @@ public static class GameBattleSceneBuilder
 		SetField(vfxComp, "damageSpawnParent", dmgSpawn);
 		SetField(vfxComp, "enemyPanels", enemyPanels);
 
+		// ── BattleAnimations (피격 점멸, 돌진 등 재사용 애니메이션) ──
+		var battleAnimsComp = root.AddComponent<BattleAnimations>();
+
 		// ── BattleSceneController ──
 		var ctrl = root.AddComponent<BattleSceneController>();
 
@@ -734,6 +732,8 @@ public static class GameBattleSceneBuilder
 
 		SetField(ctrl, "vfx", vfxComp);
 		SetField(ctrl, "battleLog", battleLogComp);
+		SetField(ctrl, "battleAnims", battleAnimsComp);
+		SetField(ctrl, "playerBody", playerImg);
 		var rollBtnComp = rollBtn.GetComponent<Button>();
 		var confirmBtnComp = confirmBtn.GetComponent<Button>();
 		var cancelBtnComp = cancelBtn.GetComponent<Button>();

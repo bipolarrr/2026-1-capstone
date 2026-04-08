@@ -21,6 +21,8 @@ public class BattleSceneController : MonoBehaviour
 
 	[SerializeField] BattleDamageVFX vfx;
 	[SerializeField] BattleLog battleLog;
+	[SerializeField] BattleAnimations battleAnims;
+	[SerializeField] Image playerBody;
 
 	[SerializeField] Button rollButton;
 	[SerializeField] Button confirmButton;
@@ -60,6 +62,8 @@ public class BattleSceneController : MonoBehaviour
 	int defenseRollsMax;
 	int currentDefenseEnemyIndex;
 	bool defenseConfirmed;
+	bool lastDefenseBlocked;
+	int lastDefenseDamage;
 	// ── 몹 데이터 (GameExploreController와 동일) ──
 	static readonly string[] MobNames = { "슬라임", "고블린", "박쥐", "해골" };
 	static readonly Color[] MobColors =
@@ -80,7 +84,7 @@ public class BattleSceneController : MonoBehaviour
 	void GenerateDefaultEnemies()
 	{
 		GameSessionManager.BattleEnemies.Clear();
-		int count = Random.Range(2, 5);
+		int count = 4;
 		for (int i = 0; i < count; i++)
 		{
 			var stat = MobStatPool[i];
@@ -378,6 +382,8 @@ UpdateRollsText();
 		if (toRoll == 0)
 		{
 			Debug.LogWarning("[Battle] RollDice: 모든 주사위 홀드 — 롤 취소");
+			if (battleLog != null)
+				battleLog.AddEntry("<color=#FF5555>모든 주사위를 저장하고 있다!</color>");
 			return;
 		}
 
@@ -477,6 +483,8 @@ UpdateRollsText();
 		bool targetWasAlive = enemies[targetIndex].IsAlive;
 		enemies[targetIndex].TakeDamage(damage);
 		vfx.SpawnDamageText(targetIndex, damage);
+		if (battleAnims != null && targetIndex < enemyBodies.Length)
+			battleAnims.FlashHit(enemyBodies[targetIndex]);
 
 		if (battleLog != null)
 		{
@@ -495,6 +503,8 @@ UpdateRollsText();
 					bool wasAlive = enemies[i].IsAlive;
 					enemies[i].TakeDamage(splash);
 					vfx.SpawnDamageText(i, splash);
+					if (battleAnims != null && i < enemyBodies.Length)
+						battleAnims.FlashHit(enemyBodies[i]);
 
 					if (battleLog != null)
 					{
@@ -611,9 +621,33 @@ if (enemyDiceFaceContainers != null)
 			if (battleLog != null)
 				battleLog.AddEntry($"<color=#FF6666>{enemies[i].name}의 공격!</color>");
 
-			// 적 점프 애니메이션
-			if (i < enemyBodies.Length && enemyBodies[i] != null)
+			// 일반 몹 여부 판별
+			bool isMelee = battleAnims != null && !GameSessionManager.IsBossBattle
+				&& i < enemyPanels.Length && enemyPanels[i] != null && playerBody != null;
+
+			RectTransform slotRt = null;
+			Vector3 slotOriginalLocal = Vector3.zero;
+
+			if (isMelee)
+			{
+				slotRt = enemyPanels[i].GetComponent<RectTransform>();
+				slotOriginalLocal = slotRt.localPosition;
+
+				// ① 플레이어 앞까지 이동 (X좌표만 변경, Y는 몹 원래 높이 유지)
+				Vector3 slotWorld = slotRt.position;
+				Vector3 playerWorld = playerBody.rectTransform.position;
+				Vector3 playerFrontWorld = new Vector3(playerWorld.x, slotWorld.y, slotWorld.z);
+				yield return StartCoroutine(battleAnims.WalkTo(slotRt, playerFrontWorld, 0.4f));
+
+				// ② 제자리 점프
+				if (i < enemyBodies.Length && enemyBodies[i] != null)
+					yield return StartCoroutine(battleAnims.JumpInPlace(enemyBodies[i].rectTransform));
+			}
+			else if (i < enemyBodies.Length && enemyBodies[i] != null)
+			{
+				// 보스: 제자리 점프만
 				yield return StartCoroutine(EnemyJumpAnimation(enemyBodies[i].rectTransform));
+			}
 
 			// 적 주사위 팝업 표시
 			if (enemyDicePopup != null)
@@ -690,10 +724,12 @@ if (enemyDiceFaceContainers != null)
 
 			yield return new WaitForSeconds(0.3f);
 
-			// ── 이 적에 대한 방어 페이즈 ──
+			// ── ③ 이 적에 대한 방어 페이즈 ──
 			currentDefenseEnemyIndex = i;
 			isDefensePhase = true;
 			defenseConfirmed = false;
+			lastDefenseBlocked = true;
+			lastDefenseDamage = 0;
 			defenseRollsMax = (enemies[i].rank >= 4) ? 3 : 1;
 			rollsRemaining = defenseRollsMax;
 			hasRolledOnce = false;
@@ -726,9 +762,36 @@ if (enemyDiceFaceContainers != null)
 			while (!defenseConfirmed)
 				yield return null;
 
+			// ── ④⑤ 방어 결과에 따른 후속 애니메이션 ──
+			if (isMelee && slotRt != null)
+			{
+				if (!lastDefenseBlocked)
+				{
+					// ⑤ 방어 실패: 플레이어 쪽으로 돌진 → 타격 → 플레이어 앞으로 복귀 → 걸어서 원래 자리
+					Vector3 slamTarget = new Vector3(playerBody.rectTransform.position.x, slotRt.position.y, slotRt.position.z);
+					yield return StartCoroutine(battleAnims.QuickSlam(slotRt, slamTarget));
+					if (battleAnims != null && playerBody != null)
+						battleAnims.FlashHit(playerBody);
+					yield return new WaitForSeconds(0.15f);
+				}
+				// ④ 방어 성공이든 실패든, 원래 자리로 복귀
+				yield return StartCoroutine(battleAnims.WalkBack(slotRt, slotOriginalLocal, 0.5f));
+			}
+			else if (!lastDefenseBlocked)
+			{
+				// 보스: 제자리 내려찍기
+				if (i < enemyBodies.Length && enemyBodies[i] != null)
+					yield return StartCoroutine(EnemySlamAnimation(enemyBodies[i].rectTransform));
+				if (battleAnims != null && playerBody != null)
+					battleAnims.FlashHit(playerBody);
+			}
+
 			// 플레이어 사망 시 중단
 			if (!GameSessionManager.IsPlayerAlive)
+			{
+				StartCoroutine(PlayerDefeatedRoutine());
 				yield break;
+			}
 
 			// 이 적의 주사위 결과 초기화
 			if (i < enemyDiceResultTexts.Length && enemyDiceResultTexts[i] != null)
@@ -754,6 +817,8 @@ if (enemyDiceFaceContainers != null)
 		int i = currentDefenseEnemyIndex;
 		if (i < 0 || i >= enemies.Count || !enemies[i].IsAlive || enemies[i].lastDiceResult == null)
 		{
+			lastDefenseBlocked = true;
+			lastDefenseDamage = 0;
 			defenseConfirmed = true;
 			return;
 		}
@@ -770,6 +835,10 @@ if (enemyDiceFaceContainers != null)
 		float reduction = enemies[i].rank >= 4 ? defense.reductionRate : (defense.blocked ? 1f : 0f);
 		int baseDmg = DefenseCalculator.CalculateEnemyDamage(enemies[i].rank, result.damageMultiplier);
 		int finalDmg = Mathf.Max(0, Mathf.CeilToInt(baseDmg * (1f - reduction)));
+
+		// 방어 결과 기록 — EnemyCounterAttackRoutine이 참조
+		lastDefenseBlocked = defense.blocked || finalDmg <= 0;
+		lastDefenseDamage = finalDmg;
 
 		if (defense.blocked)
 		{
@@ -811,7 +880,6 @@ if (enemyDiceFaceContainers != null)
 		{
 			if (battleLog != null)
 				battleLog.AddEntry("<color=#FF3333>도박사가 쓰러졌다...</color>");
-			StartCoroutine(PlayerDefeatedRoutine());
 		}
 		else
 		{
@@ -824,7 +892,7 @@ if (enemyDiceFaceContainers != null)
 		rollButton.interactable = false;
 		confirmButton.gameObject.SetActive(false);
 
-		// 코루틴에 방어 완료 신호
+		// 코루틴에 방어 완료 신호 (타격 연출은 EnemyCounterAttackRoutine에서)
 		defenseConfirmed = true;
 	}
 

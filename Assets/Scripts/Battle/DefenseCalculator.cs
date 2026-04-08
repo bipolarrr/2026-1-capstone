@@ -30,15 +30,15 @@ public static class DefenseCalculator
 
 		if (enemyResult.hasCombo)
 		{
-			// 족보 매칭: 플레이어가 같은 족보를 만들면 방어
-			var (_, playerCombo, _, _) = DamageCalculator.Calculate(playerDice, new List<PowerUpType>());
-			bool matched = !string.IsNullOrEmpty(playerCombo) && playerCombo == enemyResult.comboName;
+			// 족보 매칭: 플레이어 주사위가 적과 같은 족보를 포함하면 방어
+			// (최고 족보가 아니라 해당 족보의 성립 여부를 직접 판정)
+			bool matched = PlayerHasCombo(playerDice, enemyResult.comboName);
 			return new DefenseResult
 			{
 				blocked = matched,
 				reductionRate = matched ? 1f : 0f,
 				description = matched
-					? $"{playerCombo}로 방어 성공!"
+					? $"{enemyResult.comboName}로 방어 성공!"
 					: $"{enemyResult.comboName} 방어 실패..."
 			};
 		}
@@ -63,6 +63,43 @@ public static class DefenseCalculator
 				reductionRate = rate,
 				description = desc
 			};
+		}
+	}
+
+	/// <summary>
+	/// 플레이어 주사위 5개가 특정 족보를 포함하는지 직접 판정.
+	/// DamageCalculator의 우선순위와 무관하게, 해당 족보 조건 자체를 만족하는지 확인.
+	/// 예: Large Straight [1,2,3,4,5]는 Small Straight 조건도 충족.
+	/// </summary>
+	static bool PlayerHasCombo(int[] dice, string comboName)
+	{
+		int[] counts = new int[7];
+		foreach (int v in dice)
+			if (v >= 1 && v <= 6)
+				counts[v]++;
+
+		int maxCount = 0;
+		for (int i = 1; i <= 6; i++)
+			if (counts[i] > maxCount)
+				maxCount = counts[i];
+
+		int[] sorted = (int[])dice.Clone();
+		System.Array.Sort(sorted);
+
+		switch (comboName)
+		{
+			case "YACHT":
+				return maxCount >= 5;
+			case "Four of a Kind":
+				return maxCount >= 4;
+			case "Large Straight":
+				return DamageCalculator.HasRun(sorted, 5);
+			case "Full House":
+				return DamageCalculator.IsFullHouse(counts);
+			case "Small Straight":
+				return DamageCalculator.HasRun(sorted, 4);
+			default:
+				return false;
 		}
 	}
 
