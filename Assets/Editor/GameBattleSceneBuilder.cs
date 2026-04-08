@@ -657,10 +657,10 @@ public static class GameBattleSceneBuilder
 
 		// 주사위 뷰포트 (중앙)
 		var popupVpContainer = CreateEmpty(enemyDicePopupGo.gameObject, "EnemyDiceViewportContainer");
-		popupVpContainer.anchorMin = new Vector2(0.2f, 0.25f);
-		popupVpContainer.anchorMax = new Vector2(0.8f, 0.75f);
-		popupVpContainer.offsetMin = Vector2.zero;
-		popupVpContainer.offsetMax = Vector2.zero;
+		popupVpContainer.anchorMin = new Vector2(0.5f, 0.5f);
+		popupVpContainer.anchorMax = new Vector2(0.5f, 0.5f);
+		popupVpContainer.sizeDelta = new Vector2(960f, 540f);
+		popupVpContainer.anchoredPosition = Vector2.zero;
 
 		var popupVpBg = CreateImage(popupVpContainer.gameObject, "PopupBg",
 			new Color(0.06f, 0.06f, 0.12f, 0.95f));

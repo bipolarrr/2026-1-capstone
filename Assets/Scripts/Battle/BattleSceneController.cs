@@ -1074,17 +1074,38 @@ if (enemyDiceFaceContainers != null)
 
 		if (isDefensePhase)
 		{
-			// 방어 프리뷰: 현재 방어 대상 적과의 매칭 여부만 표시
+			// 방어 프리뷰: 현재 방어 대상 적과의 매칭 여부 표시
 			int i = currentDefenseEnemyIndex;
 			if (i >= 0 && i < enemies.Count && enemies[i].IsAlive && enemies[i].lastDiceResult != null)
 			{
-				var defense = DefenseCalculator.Evaluate(values, enemies[i].lastDiceResult);
+				var enemyResult = enemies[i].lastDiceResult;
+				var defense = DefenseCalculator.Evaluate(values, enemyResult);
 				if (defense.blocked)
-					damagePreviewText.text = $"<color=#55FF55>{enemies[i].name}: 완벽 방어!</color>";
-				else if (enemies[i].rank >= 4 && defense.reductionRate > 0f)
-					damagePreviewText.text = $"<color=#FFAA44>{enemies[i].name}: {Mathf.RoundToInt(defense.reductionRate * 100)}% 방어</color>";
+				{
+					damagePreviewText.text = $"<color=#55FF55>방어 성공!</color>";
+				}
+				else if (enemies[i].rank >= 4)
+				{
+					if (enemyResult.hasCombo)
+					{
+						// 족보 방어: 같은 족보를 만들어야 함
+						damagePreviewText.text = $"<color=#FF6666>{enemyResult.comboName}을(를) 만들어라!</color>";
+					}
+					else
+					{
+						// 눈 매칭 방어: 남은 눈 개수 표시
+						int matched = DefenseCalculator.CountMatches(values, enemyResult.values);
+						int remaining = enemyResult.values.Length - matched;
+						if (remaining > 0)
+							damagePreviewText.text = $"<color=#FFAA44>남은 눈: {remaining}개</color>";
+						else
+							damagePreviewText.text = $"<color=#55FF55>방어 성공!</color>";
+					}
+				}
 				else
+				{
 					damagePreviewText.text = $"<color=#FF6666>{enemies[i].name}: 방어 실패</color>";
+				}
 			}
 			else
 			{

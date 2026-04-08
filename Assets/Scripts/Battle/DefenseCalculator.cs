@@ -107,7 +107,7 @@ public static class DefenseCalculator
 	/// 적 주사위 눈 중 플레이어 주사위에 포함되는 개수를 센다.
 	/// 같은 눈이 여러 개면 플레이어 쪽 빈도수만큼만 매칭.
 	/// </summary>
-	static int CountMatches(int[] playerDice, int[] enemyValues)
+	public static int CountMatches(int[] playerDice, int[] enemyValues)
 	{
 		int[] playerCounts = new int[7];
 		foreach (int v in playerDice)
