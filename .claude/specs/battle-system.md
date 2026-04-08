@@ -72,7 +72,7 @@ Base formula: `damage(half-hearts) = ceil(rank × multiplier)`
 
 | Condition | Multiplier |
 |---|---:|
-| No combo (defense fail) | ×1 |
+| No combo (defense fail) | ×0.5 |
 | Small Straight | ×1.5 |
 | Full House | ×1.5 |
 | Large Straight | ×2 |

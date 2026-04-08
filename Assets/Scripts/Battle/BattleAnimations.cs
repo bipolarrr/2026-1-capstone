@@ -13,7 +13,7 @@ public class BattleAnimations : MonoBehaviour
 	/// <summary>
 	/// 대상 Image를 지정 색으로 점멸 후 원래 색으로 복귀.
 	/// </summary>
-	public Coroutine FlashHit(Image target, Color flashColor = default, float holdTime = 0.08f, float fadeTime = 0.15f)
+	public Coroutine FlashHit(Image target, Color flashColor = default, float holdTime = 0.16f, float fadeTime = 0.30f)
 	{
 		if (target == null)
 			return null;

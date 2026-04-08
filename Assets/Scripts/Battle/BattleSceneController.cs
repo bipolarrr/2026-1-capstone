@@ -634,9 +634,12 @@ if (enemyDiceFaceContainers != null)
 				slotOriginalLocal = slotRt.localPosition;
 
 				// ① 플레이어 앞까지 이동 (X좌표만 변경, Y는 몹 원래 높이 유지)
+				// 몹 바디의 월드 폭만큼 간격을 두고 플레이어 오른쪽에 섬
 				Vector3 slotWorld = slotRt.position;
 				Vector3 playerWorld = playerBody.rectTransform.position;
-				Vector3 playerFrontWorld = new Vector3(playerWorld.x, slotWorld.y, slotWorld.z);
+				float bodyWidth = enemyBodies[i].rectTransform.rect.width
+					* enemyBodies[i].rectTransform.lossyScale.x;
+				Vector3 playerFrontWorld = new Vector3(playerWorld.x + bodyWidth, slotWorld.y, slotWorld.z);
 				yield return StartCoroutine(battleAnims.WalkTo(slotRt, playerFrontWorld, 0.4f));
 
 				// ② 제자리 점프
@@ -674,7 +677,7 @@ if (enemyDiceFaceContainers != null)
 					vals[d] = Random.Range(1, 7);
 				string combo = "";
 				bool hasCombo = false;
-				float mult = 1f;
+				float mult = 0.5f;
 				if (vals.Length >= 4)
 				{
 					var (_, cn, _, _) = DamageCalculator.Calculate(
@@ -843,21 +846,21 @@ if (enemyDiceFaceContainers != null)
 		if (defense.blocked)
 		{
 			if (battleLog != null)
-				battleLog.AddEntry($"  <color=#55FF55>{enemies[i].name}: {defense.description}</color>");
+				battleLog.AddEntry($"  <color=#55FF55>{enemies[i].name}: 완벽 방어!</color>");
 		}
 		else if (finalDmg <= 0)
 		{
 			if (battleLog != null)
-				battleLog.AddEntry($"  <color=#55FF55>{enemies[i].name}: {defense.description} — 데미지 0!</color>");
+				battleLog.AddEntry($"  <color=#55FF55>{enemies[i].name}: 데미지 0!</color>");
 		}
 		else
 		{
 			if (battleLog != null)
 			{
-				if (defense.reductionRate > 0f)
-					battleLog.AddEntry($"  <color=#FFAA44>{enemies[i].name}: {defense.description} → {FormatHalf(finalDmg)} 데미지</color>");
+				if (enemies[i].rank >= 4 && reduction > 0f)
+					battleLog.AddEntry($"  <color=#FFAA44>{enemies[i].name}: {Mathf.RoundToInt(reduction * 100)}% 방어 → {FormatHalf(finalDmg)} 데미지</color>");
 				else
-					battleLog.AddEntry($"  <color=#FF6666>{enemies[i].name}: {defense.description} ({FormatHalf(finalDmg)} 데미지)</color>");
+					battleLog.AddEntry($"  <color=#FF6666>{enemies[i].name}: 방어 실패! ({FormatHalf(finalDmg)} 데미지)</color>");
 			}
 
 			bool revived = GameSessionManager.TakePlayerDamage(finalDmg);

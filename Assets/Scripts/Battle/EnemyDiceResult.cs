@@ -19,7 +19,7 @@ public class EnemyDiceResult
 			case "Large Straight":   return 2f;
 			case "Full House":       return 1.5f;
 			case "Small Straight":   return 1.5f;
-			default:                 return 1f;
+			default:                 return 0.5f;
 		}
 	}
 }

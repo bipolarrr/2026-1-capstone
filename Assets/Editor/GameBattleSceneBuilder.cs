@@ -354,7 +354,7 @@ public static class GameBattleSceneBuilder
 			container.offsetMin = Vector2.zero;
 			container.offsetMax = Vector2.zero;
 			var hlg = container.gameObject.AddComponent<HorizontalLayoutGroup>();
-			hlg.spacing = 2;
+			hlg.spacing = 4;
 			hlg.childAlignment = TextAnchor.MiddleCenter;
 			hlg.childControlWidth = false;
 			hlg.childControlHeight = false;
@@ -362,7 +362,7 @@ public static class GameBattleSceneBuilder
 			hlg.childForceExpandHeight = false;
 
 			// 주사위 5개분 Image 슬롯 생성 (정사각형 고정 크기)
-			float diceSize = 28f;
+			float diceSize = 42f;
 			for (int d = 0; d < 5; d++)
 			{
 				var faceImg = CreateImage(container.gameObject, $"Face{d}", Color.white);
@@ -595,8 +595,8 @@ public static class GameBattleSceneBuilder
 		var dmgPreview = CreateTMPText(leftArea.gameObject, "DamagePreview", "",
 			22, AccentYellow, TextAlignmentOptions.Right);
 		var dpRt = dmgPreview.GetComponent<RectTransform>();
-		dpRt.anchorMin = new Vector2(0.40f, 0.12f);
-		dpRt.anchorMax = new Vector2(0.97f, 0.22f);
+		dpRt.anchorMin = new Vector2(0.40f, 0.25f);
+		dpRt.anchorMax = new Vector2(0.97f, 0.35f);
 		dpRt.offsetMin = Vector2.zero;
 		dpRt.offsetMax = Vector2.zero;
 		dmgPreview.fontStyle = FontStyles.Bold;
