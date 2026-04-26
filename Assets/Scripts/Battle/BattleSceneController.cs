@@ -3,102 +3,30 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.SceneManagement;
-using TMPro;
 
-public class BattleSceneController : MonoBehaviour
+public class BattleSceneController : BattleControllerBase, IBattleDebugTarget
 {
-	[SerializeField] YachtDie[] dice;
-	[SerializeField] DiceViewportInteraction viewportInteraction;
-
-	[SerializeField] GameObject[] enemyPanels;
-	[SerializeField] Image[] enemyBodies;
-	[SerializeField] TMP_Text[] enemyNames;
-	[SerializeField] Image[] enemyHpFills;
-	[SerializeField] TMP_Text[] enemyHpTexts;
-	[SerializeField] Image[] targetMarkers;
-	[SerializeField] TMP_Text[] deadOverlays;
-	[SerializeField] Sprite[] mobSprites;
-
-	[SerializeField] BattleDamageVFX vfx;
-	[SerializeField] BattleLog battleLog;
-	[SerializeField] BattleAnimations battleAnims;
-	[SerializeField] Image playerBody;
+	[SerializeField] DiceRollDirector diceDirector;
 
 	[SerializeField] Button rollButton;
 	[SerializeField] Button confirmButton;
 	[SerializeField] Button cancelButton;
 	[SerializeField] Button nextRoundButton;
 
-	[SerializeField] TMP_Text rollDotsText;
-	[SerializeField] TMP_Text damagePreviewText;
-	[SerializeField] HeartDisplay heartDisplay;
-
-	// ── 적 주사위 시스템 ──
-	[SerializeField] EnemyDiceRoller enemyDiceRoller;
-	[SerializeField] GameObject enemyDicePopup;
-	[SerializeField] TMP_Text[] enemyDiceResultTexts;
-	[SerializeField] GameObject[] enemyDiceFaceContainers;
-	[SerializeField] Sprite[] diceFaceSprites;
 	[SerializeField] PlayerDeathAnimator deathAnimator;
 	[SerializeField] PlayerRollAnimator rollAnimator;
+	[SerializeField] PlayerAttackAnimator attackAnimator;
+	[SerializeField] PlayerBodyAnimator playerBodyAnimator;
 
-	int rollsRemaining;
+	// 분해된 협력 컴포넌트 — DiceBattleSceneBuilder가 AddComponent + SetField로 주입.
+	[SerializeField] EnemyCounterAttackDirector counterAttackDirector;
+	[SerializeField] BattleHudPresenter hud;
+	[SerializeField] BattleBottomFocusController bottomFocus;
+
 	bool roundConfirmed;
-	bool hasRolledOnce;
-	int activeDiceCount;
-	Vector3[] homePositions;
-	[SerializeField] Vector3 vaultCenter;
-
-	// 홀드된 주사위를 고른 순서대로 추적 — Vault 내 왼쪽부터 채움
-	List<int> heldOrder = new List<int>();
-
-	// (미사용 — /setdice가 즉시 Vault에 배치하므로 예약 불필요)
-
-	List<EnemyInfo> enemies;
-	int targetIndex;
-
-	// ── 방어 페이즈 상태 ──
-	bool isDefensePhase;
-	int defenseRollsMax;
-	int currentDefenseEnemyIndex;
-	bool defenseConfirmed;
-	bool lastDefenseBlocked;
-	int lastDefenseDamage;
-	// ── 몹 데이터 (GameExploreController와 동일) ──
-	static readonly string[] MobNames = { "슬라임", "고블린", "박쥐", "해골" };
-	static readonly Color[] MobColors =
-	{
-		new Color(0.60f, 0.90f, 0.60f),
-		new Color(0.95f, 0.75f, 0.50f),
-		new Color(0.75f, 0.60f, 0.90f),
-		new Color(0.85f, 0.85f, 0.85f)
-	};
-	static readonly (int hpMin, int hpMax, int rank)[] MobStatPool =
-	{
-		(30, 40, 1),
-		(18, 25, 2),
-		(10, 15, 3),
-		(22, 30, 2),
-	};
-
-	void GenerateDefaultEnemies()
-	{
-		GameSessionManager.BattleEnemies.Clear();
-		int count = 4;
-		for (int i = 0; i < count; i++)
-		{
-			var stat = MobStatPool[i];
-			int hp = Random.Range(stat.hpMin, stat.hpMax + 1);
-			Sprite spr = (mobSprites != null && i < mobSprites.Length) ? mobSprites[i] : null;
-			GameSessionManager.BattleEnemies.Add(
-				new EnemyInfo(MobNames[i], hp, stat.rank, MobColors[i], spr));
-		}
-		Debug.Log($"[Battle] 기본 적 생성 count={count} [{string.Join(", ", GameSessionManager.BattleEnemies.ConvertAll(e => $"{e.name}(hp{e.hp} rank{e.rank})"))}]");
-	}
 
 	void Start()
 	{
-		// 씬 직접 로딩 시 (Explore를 거치지 않은 경우) 기본 상태 자동 생성
 		if (GameSessionManager.PlayerHearts.TotalHalfHearts == 0)
 		{
 			Debug.LogWarning("[Battle] PlayerHearts가 비어 있음 — 5하트(10반칸)로 초기화");
@@ -114,7 +42,6 @@ public class BattleSceneController : MonoBehaviour
 		enemies = new List<EnemyInfo>();
 		foreach (var e in GameSessionManager.BattleEnemies)
 			enemies.Add(e.Clone());
-		// 첫 번째 살아있는 적을 자동 선택
 		targetIndex = 0;
 		for (int i = 0; i < enemies.Count; i++)
 		{
@@ -135,27 +62,66 @@ public class BattleSceneController : MonoBehaviour
 			Debug.LogWarning("[Battle] MainCamera를 찾을 수 없음 — 화면 흔들림 비활성화");
 		vfx.Init(mainCamTransform);
 
-		InitDice();
+		ApplyStageBackground();
 		SetupEnemyDisplay();
 		UpdatePlayerHUD();
+		if (bottomFocus != null)
+		{
+			bottomFocus.Bind(battleLog);
+			bottomFocus.ShowInput();
+		}
 
-		isDefensePhase = false;
-		rollsRemaining = 3;
-		hasRolledOnce = false;
+		// 적 반격 디렉터에 공유 상태 주입 — 빌더가 SerializeField는 이미 바인딩했고,
+		// 런타임 협업에 필요한 참조만 여기서 전달한다.
+		if (counterAttackDirector != null)
+		{
+			counterAttackDirector.Bind(new BattleControllerContext
+			{
+				enemies          = enemies,
+				enemyPanels      = enemyPanels,
+				enemyBodies      = enemyBodies,
+				enemyAnimators   = enemyAnimators,
+				playerBody       = playerBody,
+				playerBodyAnimator = playerBodyAnimator,
+				battleLog        = battleLog,
+				battleAnims      = battleAnims,
+				diceDirector     = diceDirector,
+				rollButton       = rollButton,
+				confirmButton    = confirmButton,
+				nextRoundButton  = nextRoundButton,
+				hud              = hud,
+				updatePlayerHud  = UpdatePlayerHUD,
+				setRoundConfirmed = v => roundConfirmed = v,
+				startPlayerDefeatedRoutine = () => StartCoroutine(PlayerDefeatedRoutine())
+			});
+			counterAttackDirector.ResetOnNewTurn();
+		}
+		else
+		{
+			Debug.LogWarning("[Battle] counterAttackDirector 미할당 — 빌더가 SetField 못했을 수 있음");
+		}
+
+		if (diceDirector != null)
+		{
+			diceDirector.OnRollStarted    += HandleRollStarted;
+			diceDirector.OnRollSettled    += HandleRollSettled;
+			diceDirector.OnHoldChanged    += HandleHoldChanged;
+			diceDirector.OnComeOutStarted += HandleComeOutStarted;
+			diceDirector.BeginTurn(3);
+			diceDirector.SetHoldInteractionEnabled(false); // 첫 롤 전에는 홀드 금지
+		}
+
 		roundConfirmed = false;
 
 		cancelButton.gameObject.SetActive(true);
 		confirmButton.gameObject.SetActive(false);
-nextRoundButton.gameObject.SetActive(false);
-		if (enemyDicePopup != null)
-			enemyDicePopup.SetActive(false);
-		if (enemyDiceFaceContainers != null)
+		nextRoundButton.gameObject.SetActive(false);
+		if (hud != null)
 		{
-			foreach (var c in enemyDiceFaceContainers)
-				if (c != null) c.SetActive(false);
+			hud.RefreshRollDots(diceDirector != null ? diceDirector.MaxRolls : 3,
+			                    diceDirector != null ? diceDirector.RollsRemaining : 0);
+			hud.ClearDamageText();
 		}
-UpdateRollsText();
-		damagePreviewText.text = "";
 
 		// 전투 개시 로그
 		if (battleLog != null)
@@ -170,151 +136,141 @@ UpdateRollsText();
 		}
 	}
 
-	void InitDice()
-	{
-		homePositions = new Vector3[dice.Length];
-		for (int i = 0; i < dice.Length; i++)
-		{
-			homePositions[i] = dice[i].transform.position;
-			dice[i].OnSettled += HandleDieSettled;
-		}
-
-		viewportInteraction.OnHoverEnter += HandleHoverEnter;
-		viewportInteraction.OnHoverExit += HandleHoverExit;
-		viewportInteraction.OnClicked += OnDieClicked;
-	}
-
 	void OnDestroy()
 	{
-		if (dice != null)
+		if (hud != null) hud.StopComboLabel();
+		if (diceDirector != null)
 		{
-			foreach (var die in dice)
-			{
-				if (die != null)
-					die.OnSettled -= HandleDieSettled;
-			}
-		}
-
-		if (viewportInteraction != null)
-		{
-			viewportInteraction.OnHoverEnter -= HandleHoverEnter;
-			viewportInteraction.OnHoverExit -= HandleHoverExit;
-			viewportInteraction.OnClicked -= OnDieClicked;
+			diceDirector.OnRollStarted    -= HandleRollStarted;
+			diceDirector.OnRollSettled    -= HandleRollSettled;
+			diceDirector.OnHoldChanged    -= HandleHoldChanged;
+			diceDirector.OnComeOutStarted -= HandleComeOutStarted;
 		}
 	}
 
-	void HandleDieSettled(YachtDie die, int result)
-	{
-		OnDieSettled();
-	}
+	// ── 이벤트 허브(DiceRollDirector → BSC) ─────────────────────
 
-	void HandleHoverEnter(YachtDie die)
+	void HandleComeOutStarted(DiceStopProfile profile, int[] plan, bool[] heldMask)
 	{
-		die.SetHovered(true);
-	}
+		string targetName = ComboProximity.GetComboName(profile.targetRank);
+		if (string.IsNullOrEmpty(targetName)) return;
 
-	void HandleHoverExit(YachtDie die)
-	{
-		die.SetHovered(false);
-	}
-
-	// 몹별 바디 앵커: (yMin, yMax) — 슬롯 내 상대 좌표, 0이 바닥(지면)
-	// GameExploreController.MobBodyAnchors와 동일한 값 유지
-	static readonly System.Collections.Generic.Dictionary<string, (float yMin, float yMax)> MobBodyAnchors = new()
-	{
-		{ "슬라임", (0.00f, 0.40f) },   // 납작, 바닥 밀착
-		{ "고블린", (0.00f, 0.75f) },   // 중간 키, 바닥
-		{ "박쥐",   (0.30f, 0.80f) },   // 공중 부유
-		{ "해골",   (0.00f, 0.75f) },   // 고블린과 동일
-	};
-
-	void SetupEnemyDisplay()
-	{
-		for (int i = 0; i < enemyPanels.Length; i++)
+		if (profile.scenario == DiceStopCase.AlreadyCombo)
 		{
-			if (i < enemies.Count)
+			var (expectedDmg, _, _, _) =
+				DamageCalculator.Calculate(plan, GameSessionManager.PowerUps);
+			if (hud != null) hud.ShowComboLabel($"{targetName} ({expectedDmg})");
+			AudioManager.Play("DIce_WakuWaku_Level3");
+		}
+
+		var faces = ComboProximity.GetDecisiveTargetFaces(plan, heldMask, profile);
+		var combos = ComboProximity.GetAllReachableCombos(plan, heldMask, profile);
+
+		var visibleStable = new List<int>();
+		if (profile.stableMask != null && plan != null)
+		{
+			for (int i = 0; i < plan.Length && i < profile.stableMask.Length; i++)
 			{
-				enemyPanels[i].SetActive(true);
-				if (enemies[i].sprite != null)
-				{
-					enemyBodies[i].sprite = enemies[i].sprite;
-					enemyBodies[i].color = Color.white;
-					enemyBodies[i].preserveAspect = true;
-				}
-				else
-				{
-					enemyBodies[i].sprite = null;
-					enemyBodies[i].color = enemies[i].color;
-					enemyBodies[i].preserveAspect = false;
-				}
-				enemyNames[i].text = $"{enemies[i].name}  <color=#FFD94A>{enemies[i].RankStars}</color>";
-				UpdateEnemyHp(i);
-				targetMarkers[i].gameObject.SetActive(i == targetIndex);
-
-				// 몹별 바디 크기/높이 차등 적용
-				var bodyRt = enemyBodies[i].rectTransform;
-				if (GameSessionManager.IsBossBattle && i == 0)
-				{
-					var rt = enemyPanels[i].GetComponent<RectTransform>();
-					rt.anchorMin = new Vector2(0.25f, 0f);
-					rt.anchorMax = new Vector2(0.75f, 1f);
-					rt.offsetMin = Vector2.zero;
-					rt.offsetMax = Vector2.zero;
-					bodyRt.localScale = new Vector3(-1f, 1f, 1f);
-				}
-				else if (MobBodyAnchors.TryGetValue(enemies[i].name, out var anchors))
-				{
-					bodyRt.anchorMin = new Vector2(0.05f, anchors.yMin);
-					bodyRt.anchorMax = new Vector2(0.95f, anchors.yMax);
-					bodyRt.offsetMin = Vector2.zero;
-					bodyRt.offsetMax = Vector2.zero;
-
-					// 타겟 마커·사망 오버레이를 바디와 동일 영역으로
-					var markerRt = targetMarkers[i].rectTransform;
-					markerRt.anchorMin = new Vector2(0.05f, anchors.yMin);
-					markerRt.anchorMax = new Vector2(0.95f, anchors.yMax);
-					markerRt.offsetMin = Vector2.zero;
-					markerRt.offsetMax = Vector2.zero;
-
-					var deadRt = deadOverlays[i].rectTransform;
-					deadRt.anchorMin = new Vector2(0.05f, anchors.yMin);
-					deadRt.anchorMax = new Vector2(0.95f, anchors.yMax);
-					deadRt.offsetMin = Vector2.zero;
-					deadRt.offsetMax = Vector2.zero;
-
-					// InfoPanel(반투명 배경)을 바디 상단(머리 위)에 배치
-					float infoPanelBottom = anchors.yMax;
-					float infoPanelTop = infoPanelBottom + 0.18f;
-
-					var infoPanelRt = enemyNames[i].transform.parent.GetComponent<RectTransform>();
-					infoPanelRt.anchorMin = new Vector2(0.0f, infoPanelBottom);
-					infoPanelRt.anchorMax = new Vector2(1.0f, infoPanelTop);
-					infoPanelRt.offsetMin = Vector2.zero;
-					infoPanelRt.offsetMax = Vector2.zero;
-				}
+				bool isHeld = heldMask != null && i < heldMask.Length && heldMask[i];
+				if (isHeld) continue;
+				if (profile.stableMask[i]) visibleStable.Add(plan[i]);
 			}
-			else
+		}
+		string currentName = ComboProximity.GetComboName(profile.plannedRank);
+		string altDebug = "";
+		if (combos.Count > 0)
+		{
+			var parts = new List<string>();
+			foreach (var (r, fs) in combos)
+				parts.Add($"{ComboProximity.GetComboName(r)}:[{string.Join(",", fs)}]");
+			altDebug = $" | altCombos={{{string.Join(" ", parts)}}}";
+		}
+		Debug.Log($"[ComeOut] {(string.IsNullOrEmpty(currentName) ? "None" : currentName)} → {targetName} | visibleStable=[{string.Join(",", visibleStable)}] | faces=[{string.Join(",", faces)}]{altDebug}");
+
+		if (battleLog == null) return;
+
+		if (profile.scenario == DiceStopCase.OneAway && combos.Count >= 2)
+		{
+			var clauses = new List<string>();
+			foreach (var (r, fs) in combos)
 			{
-				enemyPanels[i].SetActive(false);
+				string name = ComboProximity.GetComboName(r);
+				if (string.IsNullOrEmpty(name) || fs.Count == 0) continue;
+				string fc = fs.Count == 1
+					? $"[{fs[0]}]{ObjectParticle(fs[0])}"
+					: $"[{string.Join(", ", fs)}] 중 하나를";
+				clauses.Add($"{fc} 찾아 {name}를");
 			}
+			battleLog.AddEntry($"<color=#FFD94A>{string.Join(", ", clauses)} 완성시키자!</color>");
+			return;
+		}
+
+		string faceClause;
+		if (faces.Count == 0)
+			faceClause = "필요한 눈을";
+		else if (faces.Count == 1)
+			faceClause = $"[{faces[0]}]{ObjectParticle(faces[0])}";
+		else
+			faceClause = $"[{string.Join(", ", faces)}] 중 하나를";
+
+		battleLog.AddEntry($"<color=#FFD94A>{faceClause} 찾아 {targetName}를 완성시키자!</color>");
+	}
+
+	/// <summary>한국어 목적격 조사(을/를)를 주사위 눈 숫자 종성 여부로 선택.</summary>
+	static string ObjectParticle(int face)
+	{
+		switch (face)
+		{
+			case 1:
+			case 3:
+			case 6:
+				return "을";
+			default:
+				return "를";
 		}
 	}
 
-	// ── 적 타겟 선택 (패널 클릭) ──
-	// PersistentListener는 int 파라미터 직접 바인딩 불가 → 인덱스별 래퍼 메서드 필요
-	public void OnEnemyPanel0Clicked() => OnEnemyPanelClicked(0);
-	public void OnEnemyPanel1Clicked() => OnEnemyPanelClicked(1);
-	public void OnEnemyPanel2Clicked() => OnEnemyPanelClicked(2);
-	public void OnEnemyPanel3Clicked() => OnEnemyPanelClicked(3);
-
-	public void OnEnemyPanelClicked(int index)
+	void HandleRollStarted()
 	{
-		if (index < 0 || index >= enemies.Count)
-			return;
-		if (!enemies[index].IsAlive)
-			return;
-		if (roundConfirmed)
-			return;
+		if (hud != null) hud.StopComboLabel();
+		cancelButton.gameObject.SetActive(false);
+		confirmButton.gameObject.SetActive(false);
+		if (rollAnimator != null) rollAnimator.Play();
+		UpdateRollsText();
+	}
+
+	void HandleHoldChanged()
+	{
+		UpdateDamagePreview();
+	}
+
+	void HandleRollSettled()
+	{
+		UpdateRollsText();
+
+		// 방어 페이즈 자동 확정 — 디렉터가 상태 소유
+		if (counterAttackDirector != null && counterAttackDirector.IsDefensePhase)
+		{
+			if (counterAttackDirector.TryAutoConfirmDefenseOnRollSettled())
+				return;
+		}
+
+		if (!roundConfirmed)
+		{
+			confirmButton.gameObject.SetActive(true);
+			diceDirector.SetHoldInteractionEnabled(diceDirector.RollsRemaining > 0);
+		}
+
+		UpdateDamagePreview();
+	}
+
+	// ── 적 타겟 선택 ────────────────────────────────────────────
+
+	public override void OnEnemyPanelClicked(int index)
+	{
+		if (roundConfirmed) return;
+		if (index < 0 || index >= enemies.Count) return;
+		if (!enemies[index].IsAlive) return;
 
 		Debug.Log($"[Battle] OnEnemyPanelClicked → 타겟 변경: idx={index} \"{enemies[index].name}\"");
 		targetIndex = index;
@@ -322,154 +278,61 @@ UpdateRollsText();
 		UpdateDamagePreview();
 	}
 
-	// RollDice, ConfirmScore, CancelBattle, NextRound은 GameBattleSceneBuilder에서 PersistentListener로 연결됨
-
-	Vector3 VaultSlotPosition(int slot)
-	{
-		return new Vector3(vaultCenter.x, vaultCenter.y, vaultCenter.z + (1.7f - slot * 0.85f));
-	}
-
-	/// <summary>홀드 순서에 따라 Vault 내 모든 주사위를 왼쪽부터 재배치.</summary>
-	void RearrangeVault()
-	{
-		for (int slot = 0; slot < heldOrder.Count; slot++)
-		{
-			int dieIdx = heldOrder[slot];
-			dice[dieIdx].transform.position = VaultSlotPosition(slot);
-		}
-	}
-
-	void OnDieClicked(YachtDie die)
-	{
-		if (roundConfirmed || rollsRemaining >= 3)
-			return;
-		if (System.Array.Exists(dice, d => d.IsRolling))
-			return;
-
-		int idx = System.Array.IndexOf(dice, die);
-		if (idx < 0)
-			return;
-
-		if (!die.IsHeld)
-		{
-			// 홀드: 순서 리스트 끝에 추가 → 다음 빈 슬롯에 배치
-			heldOrder.Add(idx);
-			die.SetHeld(true, VaultSlotPosition(heldOrder.Count - 1));
-		}
-		else
-		{
-			// 홀드 해제: 순서 리스트에서 제거 → 나머지 좌측으로 재정렬
-			heldOrder.Remove(idx);
-			die.SetHeld(false, homePositions[idx]);
-			RearrangeVault();
-		}
-		UpdateDamagePreview();
-	}
+	// ── 버튼 콜백(빌더 PersistentListener 대상) ─────────────────
 
 	public void RollDice()
 	{
-		if (rollsRemaining <= 0 || roundConfirmed)
-			return;
-
-		// 홀드되지 않은 주사위가 있는지 먼저 확인
-		int toRoll = 0;
-		for (int i = 0; i < dice.Length; i++)
-		{
-			if (!dice[i].IsHeld)
-				toRoll++;
-		}
-
-		if (toRoll == 0)
-		{
-			Debug.LogWarning("[Battle] RollDice: 모든 주사위 홀드 — 롤 취소");
-			if (battleLog != null)
-				battleLog.AddEntry("<color=#FF5555>모든 주사위를 저장하고 있다!</color>");
-			return;
-		}
-
-		hasRolledOnce = true;
-		cancelButton.gameObject.SetActive(false);
-		rollsRemaining--;
-		activeDiceCount = toRoll;
-		Debug.Log($"[Battle] RollDice rollsRemaining={rollsRemaining}");
-
-		if (rollAnimator != null)
-			rollAnimator.Play();
-
-		for (int i = 0; i < dice.Length; i++)
-		{
-			if (!dice[i].IsHeld)
-				dice[i].Roll();
-		}
-
-		rollButton.interactable = false;
-		confirmButton.gameObject.SetActive(false);
-		UpdateRollsText();
+		if (roundConfirmed) return;
+		if (diceDirector != null) diceDirector.OnRollButtonPressed();
 	}
 
-	void OnDieSettled()
-	{
-		activeDiceCount--;
-		if (activeDiceCount > 0)
-			return;
-
-		// 모든 주사위 정지
-		int[] vals = ReadDiceValues();
-		Debug.Log($"[Battle] AllDiceSettled values=[{string.Join(",", vals)}] rollsRemaining={rollsRemaining} defense={isDefensePhase}");
-		rollButton.interactable = rollsRemaining > 0;
-
-		if (isDefensePhase)
-		{
-			int ci = currentDefenseEnemyIndex;
-			if (ci >= 0 && ci < enemies.Count && enemies[ci].IsAlive && enemies[ci].lastDiceResult != null)
-			{
-				// 랭크 < 4: 굴림 즉시 판정 (확정 버튼 불필요)
-				// 완벽 방어: 기회가 남아도 즉시 확정
-				bool autoConfirm = enemies[ci].rank < 4;
-				if (!autoConfirm)
-				{
-					var defense = DefenseCalculator.Evaluate(vals, enemies[ci].lastDiceResult);
-					autoConfirm = defense.blocked;
-				}
-				if (autoConfirm)
-				{
-					ConfirmDefense();
-					return;
-				}
-			}
-		}
-
-		confirmButton.gameObject.SetActive(true);
-
-		UpdateDamagePreview();
-	}
+	public void OnComeOutClicked() { RollDice(); }
 
 	int[] ReadDiceValues()
 	{
-		int[] values = new int[dice.Length];
-		for (int i = 0; i < dice.Length; i++)
-			values[i] = dice[i].Result;
-		return values;
+		return diceDirector != null ? diceDirector.ReadFinalValues() : new int[5];
 	}
 
 	public void ConfirmScore()
 	{
-		if (isDefensePhase)
+		if (counterAttackDirector != null && counterAttackDirector.IsDefensePhase)
 		{
-			ConfirmDefense();
+			counterAttackDirector.ConfirmDefense();
 			return;
 		}
 
 		if (roundConfirmed)
 			return;
+
+		StartCoroutine(ConfirmScoreRoutine());
+	}
+
+	IEnumerator ConfirmScoreRoutine()
+	{
 		roundConfirmed = true;
 
 		int[] values = ReadDiceValues();
-		var (damage, comboName, shake, splashRatio) = DamageCalculator.Calculate(values, GameSessionManager.PowerUps);
-		int splash = Mathf.FloorToInt(damage * splashRatio);
+		var attack = PlayerAttackPipeline.Resolve(values, GameSessionManager.PowerUps);
+		int damage = attack.damage;
+		int splash = attack.splashDamage;
+		string comboName = attack.comboName;
 		Debug.Log($"[Battle] ConfirmScore combo=\"{comboName}\" damage={damage} splash={splash} target={targetIndex}");
 
-		// 전투 로그: 공격 선언
+		AudioManager.Play(PlayerAttackPipeline.GetPlayerAttackClipName(comboName));
+
+		confirmButton.gameObject.SetActive(false);
+		rollButton.interactable = false;
+
+		if (attackAnimator != null)
+		{
+			RectTransform targetBody = targetIndex >= 0 && targetIndex < enemyBodies.Length && enemyBodies[targetIndex] != null
+				? enemyBodies[targetIndex].rectTransform
+				: null;
+			Coroutine attackAnim = attackAnimator.Play(targetBody);
+			if (attackAnim != null)
+				yield return attackAnim;
+		}
+
 		if (battleLog != null)
 		{
 			string diceStr = $"[{string.Join(", ", values)}]";
@@ -483,8 +346,11 @@ UpdateRollsText();
 		bool targetWasAlive = enemies[targetIndex].IsAlive;
 		enemies[targetIndex].TakeDamage(damage);
 		vfx.SpawnDamageText(targetIndex, damage);
-		if (battleAnims != null && targetIndex < enemyBodies.Length)
+		PlayEnemyHitAnimation(targetIndex);
+		if (battleAnims != null && targetIndex < enemyBodies.Length && !EnemyHasHitAnimation(targetIndex))
+		{
 			battleAnims.FlashHit(enemyBodies[targetIndex]);
+		}
 
 		if (battleLog != null)
 		{
@@ -492,8 +358,9 @@ UpdateRollsText();
 			if (targetWasAlive && !enemies[targetIndex].IsAlive)
 				battleLog.AddEntry($"  <color=#FF8888>{enemies[targetIndex].name} 처치!</color>");
 		}
+		if (targetWasAlive && !enemies[targetIndex].IsAlive)
+			AudioManager.Play("Enemy_Die");
 
-		// 스플래시 (데미지 적용 후 로그 — 이미 죽은 적 제외)
 		if (splash > 0)
 		{
 			for (int i = 0; i < enemies.Count; i++)
@@ -503,8 +370,11 @@ UpdateRollsText();
 					bool wasAlive = enemies[i].IsAlive;
 					enemies[i].TakeDamage(splash);
 					vfx.SpawnDamageText(i, splash);
-					if (battleAnims != null && i < enemyBodies.Length)
+					PlayEnemyHitAnimation(i);
+					if (battleAnims != null && i < enemyBodies.Length && !EnemyHasHitAnimation(i))
+					{
 						battleAnims.FlashHit(enemyBodies[i]);
+					}
 
 					if (battleLog != null)
 					{
@@ -512,31 +382,29 @@ UpdateRollsText();
 						if (wasAlive && !enemies[i].IsAlive)
 							battleLog.AddEntry($"  <color=#FF8888>{enemies[i].name} 처치!</color>");
 					}
+					if (wasAlive && !enemies[i].IsAlive)
+						AudioManager.Play("Enemy_Die");
 				}
 			}
 		}
 
 		RefreshAllEnemyHp();
 
-		if (shake > 0f)
-			vfx.Shake(shake);
+		if (attack.shakeIntensity > 0f)
+			vfx.Shake(attack.shakeIntensity);
 
-		// 전부 처치 확인
 		bool allDead = true;
 		foreach (var e in enemies)
 		{
-			if (e.IsAlive)
-			{
-				allDead = false;
-				break;
-			}
+			if (e.IsAlive) { allDead = false; break; }
 		}
 
-		confirmButton.gameObject.SetActive(false);
-		rollButton.interactable = false;
-		damagePreviewText.text = !string.IsNullOrEmpty(comboName)
-			? $"{comboName}! {damage} 데미지"
-			: $"{damage} 데미지";
+		if (hud != null)
+		{
+			hud.SetDamageResultText(!string.IsNullOrEmpty(comboName)
+				? $"{comboName}! {damage} 데미지"
+				: $"{damage} 데미지");
+		}
 
 		if (allDead)
 		{
@@ -547,449 +415,62 @@ UpdateRollsText();
 		}
 		else
 		{
-			// 타겟이 죽었으면 다음 살아있는 적으로 변경
 			if (!enemies[targetIndex].IsAlive)
 			{
 				for (int i = 0; i < enemies.Count; i++)
 				{
-					if (enemies[i].IsAlive)
-					{
-						targetIndex = i;
-						break;
-					}
+					if (enemies[i].IsAlive) { targetIndex = i; break; }
 				}
 				RefreshTargetMarkers();
 			}
 
-			// 적 반격 (순차 연출)
-			StartCoroutine(EnemyCounterAttackRoutine());
+			if (counterAttackDirector != null)
+				counterAttackDirector.StartCounterAttack();
 		}
 	}
 
 	public void NextRound()
 	{
-		isDefensePhase = false;
-		rollsRemaining = 3;
 		roundConfirmed = false;
+		if (counterAttackDirector != null) counterAttackDirector.ResetOnNewTurn();
 
-		for (int i = 0; i < dice.Length; i++)
+		if (diceDirector != null)
 		{
-			if (dice[i].IsHeld)
-				dice[i].SetHeld(false, homePositions[i]);
+			diceDirector.BeginTurn(3);
+			diceDirector.SetHoldInteractionEnabled(false);
 		}
-		heldOrder.Clear();
 
-		hasRolledOnce = false;
 		nextRoundButton.gameObject.SetActive(false);
-		rollButton.interactable = true;
 		confirmButton.gameObject.SetActive(false);
-damagePreviewText.text = "";
-if (enemyDiceFaceContainers != null)
-		{
-			foreach (var c in enemyDiceFaceContainers)
-				if (c != null) c.SetActive(false);
-		}
+		if (hud != null) hud.ClearDamageText();
 		UpdateRollsText();
 
 		if (battleLog != null)
 			battleLog.AddEntry("<color=#AAAAAA>── 다음 라운드 ──</color>");
 	}
 
-	IEnumerator EnemyCounterAttackRoutine()
+	public void CancelBattle()
 	{
-		int aliveCount = 0;
-		foreach (var e in enemies)
-		{
-			if (e.IsAlive)
-				aliveCount++;
-		}
-
-		if (aliveCount <= 0)
-		{
-			nextRoundButton.gameObject.SetActive(true);
-			yield break;
-		}
-
-		yield return new WaitForSeconds(0.5f);
-
-		// ── 각 적이 순차적으로 공격 → 플레이어 방어 ──
-		for (int i = 0; i < enemies.Count; i++)
-		{
-			if (!enemies[i].IsAlive)
-				continue;
-
-			if (battleLog != null)
-				battleLog.AddEntry($"<color=#FF6666>{enemies[i].name}의 공격!</color>");
-
-			// 일반 몹 여부 판별
-			bool isMelee = battleAnims != null && !GameSessionManager.IsBossBattle
-				&& i < enemyPanels.Length && enemyPanels[i] != null && playerBody != null;
-
-			RectTransform slotRt = null;
-			Vector3 slotOriginalLocal = Vector3.zero;
-
-			if (isMelee)
-			{
-				slotRt = enemyPanels[i].GetComponent<RectTransform>();
-				slotOriginalLocal = slotRt.localPosition;
-
-				// ① 플레이어 앞까지 이동 (X좌표만 변경, Y는 몹 원래 높이 유지)
-				// 몹 바디의 월드 폭만큼 간격을 두고 플레이어 오른쪽에 섬
-				Vector3 slotWorld = slotRt.position;
-				Vector3 playerWorld = playerBody.rectTransform.position;
-				float bodyWidth = enemyBodies[i].rectTransform.rect.width
-					* enemyBodies[i].rectTransform.lossyScale.x;
-				Vector3 playerFrontWorld = new Vector3(playerWorld.x + bodyWidth, slotWorld.y, slotWorld.z);
-				yield return StartCoroutine(battleAnims.WalkTo(slotRt, playerFrontWorld, 0.4f));
-
-				// ② 제자리 점프
-				if (i < enemyBodies.Length && enemyBodies[i] != null)
-					yield return StartCoroutine(battleAnims.JumpInPlace(enemyBodies[i].rectTransform));
-			}
-			else if (i < enemyBodies.Length && enemyBodies[i] != null)
-			{
-				// 보스: 제자리 점프만
-				yield return StartCoroutine(EnemyJumpAnimation(enemyBodies[i].rectTransform));
-			}
-
-			// 적 주사위 팝업 표시
-			if (enemyDicePopup != null)
-				enemyDicePopup.SetActive(true);
-
-			// 적 주사위 굴림
-			EnemyDiceResult result = null;
-			if (enemyDiceRoller != null)
-			{
-				bool rolled = false;
-				enemyDiceRoller.RollForEnemy(enemies[i].rank, r =>
-				{
-					result = r;
-					rolled = true;
-				});
-				while (!rolled)
-					yield return null;
-			}
-			else
-			{
-				// 폴백: 물리 주사위 없으면 랜덤 생성
-				int[] vals = new int[enemies[i].rank];
-				for (int d = 0; d < vals.Length; d++)
-					vals[d] = Random.Range(1, 7);
-				string combo = "";
-				bool hasCombo = false;
-				float mult = 0.5f;
-				if (vals.Length >= 4)
-				{
-					var (_, cn, _, _) = DamageCalculator.Calculate(
-						PadToFive(vals), new List<PowerUpType>());
-					if (!string.IsNullOrEmpty(cn))
-					{
-						combo = cn;
-						hasCombo = true;
-						mult = EnemyDiceResult.GetMultiplier(cn);
-					}
-				}
-				result = new EnemyDiceResult
-				{
-					values = vals,
-					comboName = combo,
-					damageMultiplier = mult,
-					hasCombo = hasCombo
-				};
-			}
-
-			// 팝업 닫기
-			if (enemyDicePopup != null)
-				enemyDicePopup.SetActive(false);
-
-			enemies[i].lastDiceResult = result;
-
-			// 결과 표시 (적 패널 위 — 족보 이름만, 눈은 주사위 이미지로)
-			if (i < enemyDiceResultTexts.Length && enemyDiceResultTexts[i] != null)
-			{
-				if (result.hasCombo)
-					enemyDiceResultTexts[i].text = $"<color=#FFD94A>{result.comboName}</color>";
-				else
-					enemyDiceResultTexts[i].text = "";
-			}
-
-			// 적 주사위 눈을 발 밑에 평면 표시
-			ShowEnemyDiceFaces(i, result.values);
-
-			if (battleLog != null)
-			{
-				string diceStr = $"[{string.Join(", ", result.values)}]";
-				if (result.hasCombo)
-					battleLog.AddEntry($"  <color=#FFD94A>{enemies[i].name}의 {result.comboName}!</color> {diceStr}");
-				else
-					battleLog.AddEntry($"  {enemies[i].name}이(가) 주사위를 굴렸다: {diceStr}");
-			}
-
-			yield return new WaitForSeconds(0.3f);
-
-			// ── ③ 이 적에 대한 방어 페이즈 ──
-			currentDefenseEnemyIndex = i;
-			isDefensePhase = true;
-			defenseConfirmed = false;
-			lastDefenseBlocked = true;
-			lastDefenseDamage = 0;
-			defenseRollsMax = (enemies[i].rank >= 4) ? 3 : 1;
-			rollsRemaining = defenseRollsMax;
-			hasRolledOnce = false;
-			roundConfirmed = false;
-
-			// 플레이어 주사위 리셋
-			for (int d = 0; d < dice.Length; d++)
-			{
-				if (dice[d].IsHeld)
-					dice[d].SetHeld(false, homePositions[d]);
-			}
-			heldOrder.Clear();
-
-			// UI 업데이트
-			rollButton.interactable = true;
-			confirmButton.gameObject.SetActive(false);
-			damagePreviewText.text = "";
-
-			UpdateRollsText();
-
-			if (battleLog != null)
-			{
-				if (result.hasCombo)
-					battleLog.AddEntry($"<color=#FFD94A>{enemies[i].name}의 {result.comboName}을(를) 막아라! 3회 굴림!</color>");
-				else
-					battleLog.AddEntry($"{enemies[i].name}의 공격을 방어하자! 1회 굴림!");
-			}
-
-			// 플레이어가 방어 굴림 + 확정할 때까지 대기
-			while (!defenseConfirmed)
-				yield return null;
-
-			// ── ④⑤ 방어 결과에 따른 후속 애니메이션 ──
-			if (isMelee && slotRt != null)
-			{
-				if (!lastDefenseBlocked)
-				{
-					// ⑤ 방어 실패: 플레이어 쪽으로 돌진 → 타격 → 플레이어 앞으로 복귀 → 걸어서 원래 자리
-					Vector3 slamTarget = new Vector3(playerBody.rectTransform.position.x, slotRt.position.y, slotRt.position.z);
-					yield return StartCoroutine(battleAnims.QuickSlam(slotRt, slamTarget));
-					if (battleAnims != null && playerBody != null)
-						battleAnims.FlashHit(playerBody);
-					yield return new WaitForSeconds(0.15f);
-				}
-				// ④ 방어 성공이든 실패든, 원래 자리로 복귀
-				yield return StartCoroutine(battleAnims.WalkBack(slotRt, slotOriginalLocal, 0.5f));
-			}
-			else if (!lastDefenseBlocked)
-			{
-				// 보스: 제자리 내려찍기
-				if (i < enemyBodies.Length && enemyBodies[i] != null)
-					yield return StartCoroutine(EnemySlamAnimation(enemyBodies[i].rectTransform));
-				if (battleAnims != null && playerBody != null)
-					battleAnims.FlashHit(playerBody);
-			}
-
-			// 플레이어 사망 시 중단
-			if (!GameSessionManager.IsPlayerAlive)
-			{
-				StartCoroutine(PlayerDefeatedRoutine());
-				yield break;
-			}
-
-			// 이 적의 주사위 결과 초기화
-			if (i < enemyDiceResultTexts.Length && enemyDiceResultTexts[i] != null)
-				enemyDiceResultTexts[i].text = "";
-			HideEnemyDiceFaces(i);
-
-			yield return new WaitForSeconds(0.3f);
-		}
-
-		// 모든 적의 공격이 끝남 — 다음 라운드 버튼 표시
-		isDefensePhase = false;
-		confirmButton.gameObject.SetActive(false);
-		rollButton.interactable = false;
-		nextRoundButton.gameObject.SetActive(true);
-	}
-
-	/// <summary>방어 확정 — 현재 공격 중인 적의 주사위 결과와 비교.</summary>
-	public void ConfirmDefense()
-	{
-		if (!isDefensePhase || !hasRolledOnce)
+		if (diceDirector != null && diceDirector.HasRolledOnce)
 			return;
-
-		int i = currentDefenseEnemyIndex;
-		if (i < 0 || i >= enemies.Count || !enemies[i].IsAlive || enemies[i].lastDiceResult == null)
-		{
-			lastDefenseBlocked = true;
-			lastDefenseDamage = 0;
-			defenseConfirmed = true;
-			return;
-		}
-
-		int[] playerValues = ReadDiceValues();
-
 		if (battleLog != null)
-			battleLog.AddEntry($"도박사의 방어 주사위: [{string.Join(", ", playerValues)}]");
-
-		var result = enemies[i].lastDiceResult;
-		var defense = DefenseCalculator.Evaluate(playerValues, result);
-
-		// 랭크 1~3: 비례 방어 없음 (완벽 방어 or 전부 피격)
-		float reduction = enemies[i].rank >= 4 ? defense.reductionRate : (defense.blocked ? 1f : 0f);
-		int baseDmg = DefenseCalculator.CalculateEnemyDamage(enemies[i].rank, result.damageMultiplier);
-		int finalDmg = Mathf.Max(0, Mathf.CeilToInt(baseDmg * (1f - reduction)));
-
-		// 방어 결과 기록 — EnemyCounterAttackRoutine이 참조
-		lastDefenseBlocked = defense.blocked || finalDmg <= 0;
-		lastDefenseDamage = finalDmg;
-
-		if (defense.blocked)
-		{
-			if (battleLog != null)
-				battleLog.AddEntry($"  <color=#55FF55>{enemies[i].name}: 완벽 방어!</color>");
-		}
-		else if (finalDmg <= 0)
-		{
-			if (battleLog != null)
-				battleLog.AddEntry($"  <color=#55FF55>{enemies[i].name}: 데미지 0!</color>");
-		}
-		else
-		{
-			if (battleLog != null)
-			{
-				if (enemies[i].rank >= 4 && reduction > 0f)
-					battleLog.AddEntry($"  <color=#FFAA44>{enemies[i].name}: {Mathf.RoundToInt(reduction * 100)}% 방어 → {FormatHalf(finalDmg)} 데미지</color>");
-				else
-					battleLog.AddEntry($"  <color=#FF6666>{enemies[i].name}: 방어 실패! ({FormatHalf(finalDmg)} 데미지)</color>");
-			}
-
-			bool revived = GameSessionManager.TakePlayerDamage(finalDmg);
-			UpdatePlayerHUD();
-
-			if (revived)
-			{
-				damagePreviewText.text = "부활 패시브 발동!";
-				damagePreviewText.color = new Color(0.3f, 1f, 0.5f);
-				StartCoroutine(FlashReviveText());
-				if (battleLog != null)
-					battleLog.AddEntry("<color=#55FF88>부활의 부적이 빛난다! 데미지 무효화!</color>");
-			}
-		}
-
-		// 이 적의 주사위 결과 초기화
-		enemies[i].lastDiceResult = null;
-
-		if (!GameSessionManager.IsPlayerAlive)
-		{
-			if (battleLog != null)
-				battleLog.AddEntry("<color=#FF3333>도박사가 쓰러졌다...</color>");
-		}
-		else
-		{
-			if (battleLog != null)
-				battleLog.AddEntry($"  도박사 하트: {FormatHalf(GameSessionManager.PlayerHearts.TotalHalfHearts)}");
-			Debug.Log($"[Battle] Defense vs {enemies[i].name} done hearts={GameSessionManager.PlayerHearts.TotalHalfHearts}");
-		}
-
-		// UI 정리
-		rollButton.interactable = false;
-		confirmButton.gameObject.SetActive(false);
-
-		// 코루틴에 방어 완료 신호 (타격 연출은 EnemyCounterAttackRoutine에서)
-		defenseConfirmed = true;
-	}
-
-	/// <summary>적 점프 애니메이션: 위로 → 내려찍기.</summary>
-	IEnumerator EnemyJumpAnimation(RectTransform body)
-	{
-		Vector2 originalPos = body.anchoredPosition;
-		float jumpHeight = 30f;
-		float jumpUpTime = 0.15f;
-		float slamDistance = 40f;
-		float slamDownTime = 0.1f;
-		float holdTime = 0.08f;
-		float returnTime = 0.15f;
-
-		// 위로 점프
-		float elapsed = 0f;
-		while (elapsed < jumpUpTime)
-		{
-			elapsed += Time.deltaTime;
-			float t = elapsed / jumpUpTime;
-			body.anchoredPosition = originalPos + Vector2.up * jumpHeight * t;
-			yield return null;
-		}
-
-		// 내려찍기
-		elapsed = 0f;
-		Vector2 topPos = originalPos + Vector2.up * jumpHeight;
-		float totalDown = jumpHeight + slamDistance;
-		while (elapsed < slamDownTime)
-		{
-			elapsed += Time.deltaTime;
-			float t = elapsed / slamDownTime;
-			body.anchoredPosition = topPos + Vector2.down * totalDown * t;
-			yield return null;
-		}
-		body.anchoredPosition = originalPos + Vector2.down * slamDistance;
-
-		yield return new WaitForSeconds(holdTime);
-
-		// 복귀
-		elapsed = 0f;
-		Vector2 slamPos = body.anchoredPosition;
-		while (elapsed < returnTime)
-		{
-			elapsed += Time.deltaTime;
-			float t = elapsed / returnTime;
-			body.anchoredPosition = Vector2.Lerp(slamPos, originalPos, t);
-			yield return null;
-		}
-		body.anchoredPosition = originalPos;
-	}
-
-	IEnumerator EnemySlamAnimation(RectTransform body)
-	{
-		Vector2 originalPos = body.anchoredPosition;
-		float slamDistance = 40f;
-		float slamDownTime = 0.1f;
-		float holdTime = 0.08f;
-		float returnTime = 0.15f;
-
-		// 내려찍기
-		float elapsed = 0f;
-		while (elapsed < slamDownTime)
-		{
-			elapsed += Time.deltaTime;
-			float t = elapsed / slamDownTime;
-			body.anchoredPosition = originalPos + Vector2.down * slamDistance * t;
-			yield return null;
-		}
-		body.anchoredPosition = originalPos + Vector2.down * slamDistance;
-
-		yield return new WaitForSeconds(holdTime);
-
-		// 복귀
-		elapsed = 0f;
-		Vector2 slamPos = body.anchoredPosition;
-		while (elapsed < returnTime)
-		{
-			elapsed += Time.deltaTime;
-			float t = elapsed / returnTime;
-			body.anchoredPosition = Vector2.Lerp(slamPos, originalPos, t);
-			yield return null;
-		}
-		body.anchoredPosition = originalPos;
+			battleLog.AddEntry("<color=#AAAAAA>도박사가 전투를 회피했다.</color>");
+		Debug.Log("[Battle] CancelBattle → GameExploreScene");
+		AudioManager.Play("UI_Back_NO");
+		AudioManager.Play("Transition_2");
+		GameSessionManager.LastBattleResult = BattleResult.Cancelled;
+		SceneManager.LoadScene("GameExploreScene");
 	}
 
 	IEnumerator PlayerDefeatedRoutine()
 	{
 		Debug.Log("[Battle] PlayerDefeated → MainMenu");
-		damagePreviewText.text = "패배...";
+		if (hud != null) hud.SetDamageResultText("패배...");
 		rollButton.interactable = false;
 		confirmButton.gameObject.SetActive(false);
 		nextRoundButton.gameObject.SetActive(false);
 
+		AudioManager.Play("Player_Death");
 		if (deathAnimator != null)
 		{
 			// 기존 플레이어 캐릭터는 Y축 180도 회전(좌우반전) → 오른쪽을 바라봄
@@ -1007,118 +488,44 @@ if (enemyDiceFaceContainers != null)
 		yield return new WaitForSeconds(1.2f);
 		GameSessionManager.LastBattleResult = BattleResult.Won;
 		GameSessionManager.BattleEnemies.Clear();
+		AudioManager.Play("Transition_2");
 		SceneManager.LoadScene("GameExploreScene");
 	}
 
-	public void CancelBattle()
-	{
-		if (hasRolledOnce)
-			return;
-		if (battleLog != null)
-			battleLog.AddEntry("<color=#AAAAAA>도박사가 전투를 회피했다.</color>");
-		Debug.Log("[Battle] CancelBattle → GameExploreScene");
-		GameSessionManager.LastBattleResult = BattleResult.Cancelled;
-		SceneManager.LoadScene("GameExploreScene");
-	}
-
-	void UpdateEnemyHp(int i)
-	{
-		var e = enemies[i];
-		enemyHpFills[i].fillAmount = (float)e.hp / e.maxHp;
-		enemyHpTexts[i].text = $"{e.hp} / {e.maxHp}";
-
-		if (i < deadOverlays.Length && deadOverlays[i] != null)
-			deadOverlays[i].gameObject.SetActive(!e.IsAlive);
-	}
-
-	void RefreshAllEnemyHp()
-	{
-		for (int i = 0; i < enemies.Count; i++)
-		{
-			if (i < enemyPanels.Length)
-				UpdateEnemyHp(i);
-		}
-	}
-
-	void RefreshTargetMarkers()
-	{
-		for (int i = 0; i < enemyPanels.Length; i++)
-		{
-			if (i < enemies.Count)
-				targetMarkers[i].gameObject.SetActive(i == targetIndex);
-		}
-	}
+	// ── HUD 갱신 래퍼 ────────────────────────────────────────────
 
 	void UpdateRollsText()
 	{
-		if (rollDotsText == null) return;
-		int total = 3;
-		var sb = new System.Text.StringBuilder();
-		for (int i = 0; i < total; i++)
-		{
-			if (i > 0) sb.Append(' ');
-			sb.Append(i < rollsRemaining ? '●' : '○');
-		}
-		rollDotsText.text = sb.ToString();
+		if (hud == null) return;
+		int total = diceDirector != null ? diceDirector.MaxRolls : 3;
+		int remaining = diceDirector != null ? diceDirector.RollsRemaining : 0;
+		hud.RefreshRollDots(total, remaining);
 	}
 
 	void UpdateDamagePreview()
 	{
-		if (!hasRolledOnce)
+		if (diceDirector == null || !diceDirector.HasRolledOnce)
 		{
-			damagePreviewText.text = "";
+			if (hud != null) hud.SetDamageResultText("");
 			return;
 		}
 
 		int[] values = ReadDiceValues();
 
-		if (isDefensePhase)
+		if (counterAttackDirector != null && counterAttackDirector.IsDefensePhase)
 		{
-			// 방어 프리뷰: 현재 방어 대상 적과의 매칭 여부 표시
-			int i = currentDefenseEnemyIndex;
-			if (i >= 0 && i < enemies.Count && enemies[i].IsAlive && enemies[i].lastDiceResult != null)
-			{
-				var enemyResult = enemies[i].lastDiceResult;
-				var defense = DefenseCalculator.Evaluate(values, enemyResult);
-				if (defense.blocked)
-				{
-					damagePreviewText.text = $"<color=#55FF55>방어 성공!</color>";
-				}
-				else if (enemies[i].rank >= 4)
-				{
-					if (enemyResult.hasCombo)
-					{
-						// 족보 방어: 같은 족보를 만들어야 함
-						damagePreviewText.text = $"<color=#FF6666>{enemyResult.comboName}을(를) 만들어라!</color>";
-					}
-					else
-					{
-						// 눈 매칭 방어: 남은 눈 개수 표시
-						int matched = DefenseCalculator.CountMatches(values, enemyResult.values);
-						int remaining = enemyResult.values.Length - matched;
-						if (remaining > 0)
-							damagePreviewText.text = $"<color=#FFAA44>남은 눈: {remaining}개</color>";
-						else
-							damagePreviewText.text = $"<color=#55FF55>방어 성공!</color>";
-					}
-				}
-				else
-				{
-					damagePreviewText.text = $"<color=#FF6666>{enemies[i].name}: 방어 실패</color>";
-				}
-			}
-			else
-			{
-				damagePreviewText.text = "";
-			}
+			counterAttackDirector.UpdateDefensePreview(values);
+			return;
 		}
-		else
+
+		var (damage, comboName, _, _) = DamageCalculator.Calculate(values, GameSessionManager.PowerUps);
+		if (hud != null)
 		{
-			var (damage, comboName, _, _) = DamageCalculator.Calculate(values, GameSessionManager.PowerUps);
+			hud.ShowAttackPreview(damage, comboName);
 			if (!string.IsNullOrEmpty(comboName))
-				damagePreviewText.text = $"예상: {comboName} → {damage}";
+				hud.ShowComboLabel(comboName);
 			else
-				damagePreviewText.text = $"예상: {damage}";
+				hud.StopComboLabel();
 		}
 	}
 
@@ -1128,70 +535,28 @@ if (enemyDiceFaceContainers != null)
 			heartDisplay.Refresh(GameSessionManager.PlayerHearts);
 	}
 
-	IEnumerator FlashReviveText()
-	{
-		float elapsed = 0f;
-		float duration = 1.5f;
-		Vector3 baseScale = damagePreviewText.transform.localScale;
-		damagePreviewText.transform.localScale = baseScale * 1.5f;
-		while (elapsed < duration)
-		{
-			elapsed += Time.deltaTime;
-			float t = elapsed / duration;
-			damagePreviewText.transform.localScale = Vector3.Lerp(baseScale * 1.5f, baseScale, t);
-			damagePreviewText.color = Color.Lerp(new Color(0.3f, 1f, 0.5f), Color.white, t);
-			yield return null;
-		}
-		damagePreviewText.transform.localScale = baseScale;
-		damagePreviewText.color = Color.white;
-	}
-
-	// ── 디버그 명령 ──
+	// ── 디버그 명령(IBattleDebugTarget) ─────────────────────────
 
 	public string DebugSetDice(int[] values)
 	{
-		if (values == null || values.Length != dice.Length)
-			return $"[오류] 주사위 {dice.Length}개의 값이 필요합니다.";
+		if (diceDirector == null) return "[오류] DiceRollDirector 미할당.";
+		if (values == null || values.Length != 5)
+			return "[오류] 주사위 5개의 값이 필요합니다.";
 
-		bool anyRolling = false;
-		foreach (var d in dice)
-		{
-			if (d.IsRolling)
-			{
-				anyRolling = true;
-				break;
-			}
-		}
-
-		if (anyRolling)
+		if (diceDirector.AnyDiceSpinning())
 			return "[오류] 주사위가 굴러가는 중에는 사용할 수 없습니다.";
 
 		if (roundConfirmed)
 			return "[오류] 주사위를 굴릴 수 있는 상황이 아닙니다. 다음 턴 버튼을 눌러주세요.";
 
-		// 굴림 횟수 1 소진 (0이어도 강제 진행)
-		if (rollsRemaining > 0)
-			rollsRemaining--;
-		hasRolledOnce = true;
 		cancelButton.gameObject.SetActive(false);
-
-		// 모든 주사위를 강제값으로 설정하고 Vault에 배치
-		heldOrder.Clear();
-		for (int i = 0; i < dice.Length; i++)
-		{
-			if (dice[i].IsHeld)
-				dice[i].SetHeld(false, homePositions[i]);
-			dice[i].ForceResultWithRotation(values[i]);
-			heldOrder.Add(i);
-			dice[i].SetHeld(true, VaultSlotPosition(i));
-		}
+		diceDirector.ForceSetDiceToVault(values);
 
 		UpdateRollsText();
-		rollButton.interactable = rollsRemaining > 0;
 		confirmButton.gameObject.SetActive(true);
 		roundConfirmed = false;
 		UpdateDamagePreview();
-		return $"주사위 강제 적용 → Vault 저장: [{string.Join(", ", values)}] (남은 굴림: {rollsRemaining})";
+		return $"주사위 강제 적용 → Vault 저장: [{string.Join(", ", values)}] (남은 굴림: {diceDirector.RollsRemaining})";
 	}
 
 	public string DebugKillPlayer()
@@ -1213,11 +578,7 @@ if (enemyDiceFaceContainers != null)
 		bool anyAlive = false;
 		foreach (var e in enemies)
 		{
-			if (e.IsAlive)
-			{
-				anyAlive = true;
-				break;
-			}
+			if (e.IsAlive) { anyAlive = true; break; }
 		}
 		if (!anyAlive)
 			return "[무시] 살아있는 적이 없습니다.";
@@ -1257,11 +618,7 @@ if (enemyDiceFaceContainers != null)
 		bool allDead = true;
 		foreach (var e in enemies)
 		{
-			if (e.IsAlive)
-			{
-				allDead = false;
-				break;
-			}
+			if (e.IsAlive) { allDead = false; break; }
 		}
 
 		if (allDead)
@@ -1278,73 +635,12 @@ if (enemyDiceFaceContainers != null)
 			{
 				for (int i = 0; i < enemies.Count; i++)
 				{
-					if (enemies[i].IsAlive)
-					{
-						targetIndex = i;
-						break;
-					}
+					if (enemies[i].IsAlive) { targetIndex = i; break; }
 				}
 			}
 			RefreshTargetMarkers();
 		}
 
 		return sb.ToString().TrimEnd();
-	}
-
-	/// <summary>DamageCalculator용 5개 배열 패딩.</summary>
-	static int[] PadToFive(int[] values)
-	{
-		if (values.Length >= 5)
-			return values;
-		int[] padded = new int[5];
-		for (int i = 0; i < values.Length; i++)
-			padded[i] = values[i];
-		return padded;
-	}
-
-	/// <summary>반칸 수를 "N칸" 또는 "N칸 반" 형태로 표시.</summary>
-	static string FormatHalf(int halfHearts)
-	{
-		int full = halfHearts / 2;
-		bool half = halfHearts % 2 != 0;
-		if (half)
-			return full > 0 ? $"{full}칸 반" : "반 칸";
-		return $"{full}칸";
-	}
-
-	void ShowEnemyDiceFaces(int enemyIndex, int[] values)
-	{
-		if (enemyDiceFaceContainers == null || diceFaceSprites == null)
-			return;
-		if (enemyIndex < 0 || enemyIndex >= enemyDiceFaceContainers.Length)
-			return;
-
-		var container = enemyDiceFaceContainers[enemyIndex];
-		if (container == null) return;
-		container.SetActive(true);
-
-		for (int d = 0; d < container.transform.childCount; d++)
-		{
-			var child = container.transform.GetChild(d);
-			if (d < values.Length)
-			{
-				child.gameObject.SetActive(true);
-				var img = child.GetComponent<Image>();
-				if (img != null && values[d] >= 1 && values[d] <= 6)
-					img.sprite = diceFaceSprites[values[d] - 1];
-			}
-			else
-			{
-				child.gameObject.SetActive(false);
-			}
-		}
-	}
-
-	void HideEnemyDiceFaces(int enemyIndex)
-	{
-		if (enemyDiceFaceContainers == null) return;
-		if (enemyIndex < 0 || enemyIndex >= enemyDiceFaceContainers.Length) return;
-		if (enemyDiceFaceContainers[enemyIndex] != null)
-			enemyDiceFaceContainers[enemyIndex].SetActive(false);
 	}
 }

@@ -28,10 +28,12 @@ public class GameExploreController : MonoBehaviour
 	[SerializeField] TMP_Text[] enemyNames;
 	[SerializeField] Image[] enemyHpFills;
 	[SerializeField] TMP_Text[] enemyHpTexts;
-	[SerializeField] Sprite[] mobSprites;
-	[SerializeField] Sprite bossSprite;
 	[SerializeField] Button fightButton;
 	[SerializeField] Button fleeButton;
+
+	// ── 스테이지별 스프라이트 번들 (씬 빌더가 편집 시점에 채움) ──
+	[SerializeField] StageSpriteBundle[] stageBundles;
+	[SerializeField] Image backgroundImage; // 스테이지 전환 시 배경 교체용
 
 	// ── 아이템 조우 ──
 	[SerializeField] CanvasGroup itemGroup;
@@ -51,39 +53,56 @@ public class GameExploreController : MonoBehaviour
 
 	enum ExploreState { Walking, Encounter }
 
-	static readonly EventType[] EventSequence =
-	{
-		EventType.NormalCombat,
-		EventType.ItemBox,
-		EventType.BossCombat
-	};
-
-	enum EventType { NormalCombat, ItemBox, BossCombat }
-
 	ExploreState state;
 	float walkTimer;
 	Vector3 playerBasePos;
 
-	static readonly string[] MobNames = { "슬라임", "고블린", "박쥐", "해골" };
-	static readonly Color[] MobColors =
-	{
-		new Color(0.60f, 0.90f, 0.60f),
-		new Color(0.95f, 0.75f, 0.50f),
-		new Color(0.75f, 0.60f, 0.90f),
-		new Color(0.85f, 0.85f, 0.85f)
-	};
-
-	// 몹별 바디 앵커: (yMin, yMax) — 슬롯 내 상대 좌표, 0이 바닥(초록 땅)
-	// 0=슬라임(작고 바닥), 1=고블린(중간 바닥), 2=박쥐(공중 부유), 3=해골(고블린급 바닥)
-	static readonly (float yMin, float yMax)[] MobBodyAnchors =
-	{
-		(0.00f, 0.40f),  // 슬라임: 납작, 바닥 밀착
-		(0.00f, 0.75f),  // 고블린: 중간 키, 바닥
-		(0.30f, 0.80f),  // 박쥐: 공중에 떠 있음
-		(0.00f, 0.75f),  // 해골: 고블린과 비슷, 바닥
-	};
-
 	int activeEnemyCount;
+
+	StageData ActiveStage => GameSessionManager.CurrentStage;
+
+	StageSpriteBundle FindBundle(string stageId)
+	{
+		if (stageBundles == null) return null;
+		for (int i = 0; i < stageBundles.Length; i++)
+			if (stageBundles[i] != null && stageBundles[i].stageId == stageId)
+				return stageBundles[i];
+		return null;
+	}
+
+	void ApplyStageVisuals()
+	{
+		var stage = ActiveStage;
+		if (stage == null || backgroundImage == null) return;
+		var bundle = FindBundle(stage.id);
+		if (bundle != null && bundle.background != null)
+		{
+			backgroundImage.sprite = bundle.background;
+			backgroundImage.color  = Color.white;
+		}
+		else
+		{
+			backgroundImage.sprite = null;
+			backgroundImage.color  = stage.themeColor;
+		}
+
+		ApplyPlayerGroundOffset();
+	}
+
+	bool playerAnchorShifted;
+
+	void ApplyPlayerGroundOffset()
+	{
+		if (playerAnchorShifted || playerBody == null) return;
+		var stage = ActiveStage;
+		if (stage == null) return;
+		float delta = stage.playerGroundYOffset;
+		if (Mathf.Abs(delta) < 0.0001f) { playerAnchorShifted = true; return; }
+		var rt = playerBody.rectTransform;
+		rt.anchorMin = new Vector2(rt.anchorMin.x, rt.anchorMin.y + delta);
+		rt.anchorMax = new Vector2(rt.anchorMax.x, rt.anchorMax.y + delta);
+		playerAnchorShifted = true;
+	}
 
 	static void ShowPanel(CanvasGroup cg, bool show)
 	{
@@ -106,8 +125,9 @@ public class GameExploreController : MonoBehaviour
 
 		playerBasePos = playerBody.rectTransform.anchoredPosition;
 		UpdateHUD();
+		ApplyStageVisuals();
 
-		Debug.Log($"[Explore] Start lastBattle={GameSessionManager.LastBattleResult} eventIdx={GameSessionManager.CurrentEventIndex} hearts={GameSessionManager.PlayerHearts.TotalHalfHearts}");
+		Debug.Log($"[Explore] Start stage={GameSessionManager.CurrentStageId} lastBattle={GameSessionManager.LastBattleResult} eventIdx={GameSessionManager.CurrentEventIndex} hearts={GameSessionManager.PlayerHearts.TotalHalfHearts}");
 
 		// CurrentEventIndex 증가는 이 씬에서 일원화: 전투 승리, 아이템 선택 모두 여기서 처리
 		switch (GameSessionManager.LastBattleResult)
@@ -180,9 +200,10 @@ public class GameExploreController : MonoBehaviour
 	void TriggerNextEvent()
 	{
 		state = ExploreState.Encounter;
+		var stage = ActiveStage;
 		int idx = GameSessionManager.CurrentEventIndex;
 
-		if (idx >= EventSequence.Length)
+		if (stage == null || stage.rounds == null || idx >= stage.rounds.Count)
 		{
 			ShowVictory();
 			return;
@@ -194,26 +215,27 @@ public class GameExploreController : MonoBehaviour
 	void ShowCurrentEncounter()
 	{
 		state = ExploreState.Encounter;
+		var stage = ActiveStage;
 		int idx = GameSessionManager.CurrentEventIndex;
-		if (idx >= EventSequence.Length)
+		if (stage == null || stage.rounds == null || idx >= stage.rounds.Count)
 		{
 			ShowVictory();
 			return;
 		}
 
-		EventType evt = EventSequence[idx];
-		Debug.Log($"[Explore] ShowCurrentEncounter eventIdx={idx} type={evt}");
+		StageRoundType evt = stage.rounds[idx];
+		Debug.Log($"[Explore] ShowCurrentEncounter stage={stage.id} roundIdx={idx} type={evt}");
 
 		switch (evt)
 		{
-			case EventType.NormalCombat:
+			case StageRoundType.NormalCombat:
 				SetupCombatEncounter(false);
 				break;
-			case EventType.ItemBox:
+			case StageRoundType.ItemBox:
 				ShowPanel(encounterPanel, true);
 				SetupItemEncounter();
 				break;
-			case EventType.BossCombat:
+			case StageRoundType.BossCombat:
 				SetupCombatEncounter(true);
 				break;
 		}
@@ -227,15 +249,19 @@ public class GameExploreController : MonoBehaviour
 		ShowPanel(combatGroup, true);
 		ShowPanel(itemGroup, false);
 
+		var stage = ActiveStage;
+		var bundle = stage != null ? FindBundle(stage.id) : null;
+
 		if (isBoss)
 		{
 			encounterTitle.text = "보스 등장!";
-			if (GameSessionManager.BattleEnemies.Count == 0)
+			if (GameSessionManager.BattleEnemies.Count == 0 && stage != null && stage.boss != null)
 			{
+				Sprite bossSpr = bundle != null ? bundle.bossSprite : null;
 				GameSessionManager.BattleEnemies.Clear();
 				GameSessionManager.BattleEnemies.Add(
-					new EnemyInfo("어둠의 지배자", GameSessionManager.BossHp, 5,
-						new Color(0.95f, 0.45f, 0.45f), bossSprite));
+					new EnemyInfo(stage.boss.name, stage.boss.hp, stage.boss.rank,
+						stage.boss.themeColor, bossSpr));
 			}
 		}
 		else
@@ -248,45 +274,65 @@ public class GameExploreController : MonoBehaviour
 		RefreshEnemySlots();
 	}
 
-	// ── 몹 밸런스 (하트 5개 = 10반칸 기준) ──
-	// rank × 1반칸 = 기본 데미지, 족보 시 배율 증가
-	// 슬라임 rank1=1반칸, 박쥐 rank3=3반칸 → 고랭크 먼저 잡는 것이 핵심
-	static readonly (int hpMin, int hpMax, int rank)[] MobStatPool =
-	{
-		(30, 40, 1),   // 슬라임: 탱커 — HP 높고 rank 낮음
-		(18, 25, 2),   // 고블린: 밸런스
-		(10, 15, 3),   // 박쥐: 딜러 — HP 낮지만 rank 높음
-		(22, 30, 2),   // 해골: 서브탱커
-	};
-
 	void GenerateNormalEnemies()
 	{
 		GameSessionManager.BattleEnemies.Clear();
-		int count = Random.Range(2, 5);
+		var stage = ActiveStage;
+		if (stage == null || stage.mobPool == null || stage.mobPool.Count == 0)
+		{
+			Debug.LogWarning("[Explore] GenerateNormalEnemies: 활성 스테이지에 mobPool이 비어있음");
+			return;
+		}
+
+		var bundle = FindBundle(stage.id);
+
+		int countMin = Mathf.Max(1, stage.normalEnemyCountMin);
+		int countMaxExclusive = Mathf.Max(countMin + 1, stage.normalEnemyCountMax + 1);
+		int count = Random.Range(countMin, countMaxExclusive);
+		count = Mathf.Min(count, stage.mobPool.Count); // 풀 크기보다 많이 뽑지 않음
+		count = Mathf.Min(count, enemySlots != null ? enemySlots.Length : count);
+
+		// 풀에서 중복 없이 count개 인덱스 추첨
+		var available = new List<int>(stage.mobPool.Count);
+		for (int k = 0; k < stage.mobPool.Count; k++) available.Add(k);
+
 		for (int i = 0; i < count; i++)
 		{
-			var stat = MobStatPool[i];
-			int hp = Random.Range(stat.hpMin, stat.hpMax + 1);
-			Sprite spr = (mobSprites != null && i < mobSprites.Length) ? mobSprites[i] : null;
+			int pick = Random.Range(0, available.Count);
+			int idx = available[pick];
+			available.RemoveAt(pick);
+
+			var def = stage.mobPool[idx];
+			int hp = Random.Range(def.hpMin, def.hpMax + 1);
+			Sprite spr = (bundle != null && bundle.mobSprites != null && idx < bundle.mobSprites.Length)
+				? bundle.mobSprites[idx]
+				: null;
 			GameSessionManager.BattleEnemies.Add(
-				new EnemyInfo(MobNames[i], hp, stat.rank, MobColors[i], spr));
+				new EnemyInfo(def.name, hp, def.rank, def.themeColor, spr));
 		}
-		Debug.Log($"[Explore] GenerateNormalEnemies count={count} stats=[{string.Join(",", GameSessionManager.BattleEnemies.ConvertAll(e => $"{e.name}(hp{e.hp} rank{e.rank})"))}]");
+		Debug.Log($"[Explore] GenerateNormalEnemies stage={stage.id} count={count} [{string.Join(",", GameSessionManager.BattleEnemies.ConvertAll(e => $"{e.name}(hp{e.hp} rank{e.rank})"))}]");
 	}
 
 	/// <summary>싸운다 버튼 — 전투 컨텍스트만 설정하고 BattleScene으로 진입</summary>
 	public void OnFightClicked()
 	{
+		var stage = ActiveStage;
 		int idx = GameSessionManager.CurrentEventIndex;
-		GameSessionManager.IsBossBattle = EventSequence[idx] == EventType.BossCombat;
-		Debug.Log($"[Explore] OnFightClicked boss={GameSessionManager.IsBossBattle} enemies={GameSessionManager.BattleEnemies.Count}");
-		SceneManager.LoadScene("GameBattleScene");
+		GameSessionManager.IsBossBattle = stage != null && stage.rounds != null
+			&& idx >= 0 && idx < stage.rounds.Count
+			&& stage.rounds[idx] == StageRoundType.BossCombat;
+		Debug.Log($"[Explore] OnFightClicked stage={stage?.id} boss={GameSessionManager.IsBossBattle} enemies={GameSessionManager.BattleEnemies.Count}");
+		AudioManager.Play("UI_OK");
+		AudioManager.Play("Transition_3");
+		AudioManager.Play("Environment_Desert");
+		SceneManager.LoadScene(ResolveBattleSceneName(GameSessionManager.SelectedCharacter));
 	}
 
 	/// <summary>도망 버튼 — 조우를 회피하고 다시 걷기 (같은 이벤트 재조우)</summary>
 	public void OnFleeClicked()
 	{
 		Debug.Log("[Explore] OnFleeClicked → 도망, 다시 걷기");
+		AudioManager.Play("UI_Back_NO");
 		ShowPanel(combatGroup, false);
 		StartWalking();
 	}
@@ -340,9 +386,16 @@ public class GameExploreController : MonoBehaviour
 				}
 				else
 				{
-					int mobIdx = Mathf.Clamp(i, 0, MobBodyAnchors.Length - 1);
-					bodyRt.anchorMin = new Vector2(0.05f, MobBodyAnchors[mobIdx].yMin);
-					bodyRt.anchorMax = new Vector2(0.95f, MobBodyAnchors[mobIdx].yMax);
+					// 스테이지 mobPool에서 이름으로 앵커 조회
+					float yMin = 0.00f, yMax = 0.75f;
+					var stage = ActiveStage;
+					if (stage != null)
+					{
+						var def = stage.FindMob(enemies[i].name);
+						if (def != null) { yMin = def.bodyYMin; yMax = def.bodyYMax; }
+					}
+					bodyRt.anchorMin = new Vector2(0.05f, yMin);
+					bodyRt.anchorMax = new Vector2(0.95f, yMax);
 					bodyRt.localScale = Vector3.one;
 				}
 				bodyRt.offsetMin = Vector2.zero;
@@ -397,6 +450,8 @@ public class GameExploreController : MonoBehaviour
 			GameSessionManager.PowerUps.Add(type);
 
 		Debug.Log($"[Explore] OnItemSelected type={type} powerUps=[{string.Join(",", GameSessionManager.PowerUps)}]");
+		AudioManager.Play("UI_Purchase_OK_LockIn");
+		AudioManager.Play("Player_EarnDrop");
 		GameSessionManager.CurrentEventIndex++;
 		UpdateHUD();
 		StartWalking();
@@ -413,6 +468,7 @@ public class GameExploreController : MonoBehaviour
 	public void OnReturnToMainMenu()
 	{
 		Debug.Log("[Explore] OnReturnToMainMenu → MainMenu");
+		AudioManager.Play("Transition_2_Quit");
 		SceneManager.LoadScene("MainMenu");
 	}
 
@@ -447,6 +503,16 @@ public class GameExploreController : MonoBehaviour
 			case PowerUpType.AllOrNothing:  return "[올인 전략]";
 			case PowerUpType.ReviveOnce:    return "[부활 부적]";
 			default: return type.ToString();
+		}
+	}
+
+	static string ResolveBattleSceneName(CharacterType character)
+	{
+		switch (character)
+		{
+			case CharacterType.Mahjong: return "MahjongBattleScene";
+			case CharacterType.Holdem:  return "DiceBattleScene"; // 홀덤 씬 미구현 → 임시로 주사위
+			default:                    return "DiceBattleScene";
 		}
 	}
 }

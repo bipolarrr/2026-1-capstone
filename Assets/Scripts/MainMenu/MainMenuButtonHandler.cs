@@ -17,6 +17,8 @@ public class MainMenuButtonHandler : MonoBehaviour
 		if (menuController != null)
 		{
 			Debug.Log("[MainMenu] OnPlayClicked → CharacterSelect");
+			AudioManager.Play("UI_OK");
+			AudioManager.Play("Transition_2");
 			menuController.LoadGameScene();
 		}
 		else
@@ -30,6 +32,7 @@ public class MainMenuButtonHandler : MonoBehaviour
 		if (settingsPopup != null)
 		{
 			Debug.Log("[MainMenu] OnSettingsClicked → 설정 팝업 열기");
+			AudioManager.Play("UI_Click");
 			settingsPopup.Open();
 		}
 		else
@@ -43,6 +46,7 @@ public class MainMenuButtonHandler : MonoBehaviour
 		if (creditsPopup != null)
 		{
 			Debug.Log("[MainMenu] OnCreditsClicked → 크레딧 팝업 열기");
+			AudioManager.Play("UI_Click");
 			creditsPopup.Open();
 		}
 		else

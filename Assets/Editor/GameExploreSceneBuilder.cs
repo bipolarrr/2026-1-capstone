@@ -50,19 +50,26 @@ public static class GameExploreSceneBuilder
 		bgMask.gameObject.AddComponent<RectMask2D>();
 
 		var bgImg = CreateImage(bgMask.gameObject, "Background", Color.white);
-		var fightBgTex = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Mobs/Fight_Background.png");
-		float bgAspect = fightBgTex != null ? (float)fightBgTex.width / fightBgTex.height : 16f / 9f;
+		// 기본 스테이지(보통 Stage 1 Forest)의 배경을 시작값으로 사용 — 런타임 ApplyStageVisuals가 활성 스테이지에 맞게 교체
+		var defaultStage = StageRegistry.DefaultStage;
+		var defaultBundle = defaultStage != null ? SceneBuilderUtility.BuildStageBundle(defaultStage) : null;
+		Sprite bgSprite = defaultBundle != null ? defaultBundle.background : null;
+		float bgAspect = 16f / 9f;
+		if (bgSprite != null && bgSprite.texture != null)
+			bgAspect = (float)bgSprite.texture.width / bgSprite.texture.height;
 		float bgImgHeight = 1920f / bgAspect;
 		bgImg.anchorMin = new Vector2(0f, 0f);
 		bgImg.anchorMax = new Vector2(1f, 0f);
 		bgImg.pivot = new Vector2(0.5f, 0f);
 		bgImg.offsetMin = new Vector2(0f, 0f);
 		bgImg.offsetMax = new Vector2(0f, bgImgHeight);
-		var bgSprite = AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Mobs/Fight_Background.png");
+		var bgImageComp = bgImg.GetComponent<Image>();
 		if (bgSprite != null)
-			bgImg.GetComponent<Image>().sprite = bgSprite;
+			bgImageComp.sprite = bgSprite;
+		else if (defaultStage != null)
+			bgImageComp.color = defaultStage.themeColor;
 		else
-			bgImg.GetComponent<Image>().color = BgColor;
+			bgImageComp.color = BgColor;
 
 		// ── 지면 기준선 (배경 흙길 높이) ──
 		const float GroundY = 0.12f;
@@ -376,18 +383,11 @@ public static class GameExploreSceneBuilder
 		SetField(ctrl, "enemyHpFills", enemyHpFills);
 		SetField(ctrl, "enemyHpTexts", enemyHpTextArr);
 
-		// 몹 스프라이트 로드 (슬라임, 고블린, 박쥐, 해골 순)
-		// 텍스처 임포트: Sprite 타입 + Single 모드를 보장
-		Sprite[] mobSprites = new Sprite[4];
-		string[] spriteFiles = { "Slime_sample", "Goblin_sample", "Bat_sample", "Skeleton_sample" };
-		for (int i = 0; i < spriteFiles.Length; i++)
-			EnsureTightSprite($"Assets/Mobs/{spriteFiles[i]}.png");
-		for (int i = 0; i < spriteFiles.Length; i++)
-			mobSprites[i] = AssetDatabase.LoadAssetAtPath<Sprite>($"Assets/Mobs/{spriteFiles[i]}.png");
-		SetField(ctrl, "mobSprites", mobSprites);
-		EnsureTightSprite("Assets/Mobs/Boss_Dracula_example.png");
-		var bossSpr = AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Mobs/Boss_Dracula_example.png");
-		SetField(ctrl, "bossSprite", bossSpr);
+		// 스테이지별 스프라이트 번들 — 레지스트리에 등록된 모든 스테이지를 편집 시점에 로드
+		// 누락 에셋은 스테이지/몹의 themeColor로 자동 폴백 생성
+		var stageBundles = SceneBuilderUtility.BuildAllStageBundles();
+		SetField(ctrl, "stageBundles", stageBundles);
+		SetField(ctrl, "backgroundImage", bgImageComp);
 
 		SetField(ctrl, "fightButton", fightButton);
 		SetField(ctrl, "fleeButton", fleeButton);
@@ -405,6 +405,13 @@ public static class GameExploreSceneBuilder
 		// ── 디버그 콘솔 ──
 		var debugGo = new GameObject("DebugConsole");
 		debugGo.AddComponent<DebugConsoleController>();
+
+		// ── 오디오 매니저 ─────────────────────────────────────────
+		SceneBuilderUtility.BuildAudioManager(new[]
+		{
+			"UI_OK", "UI_Back_NO", "UI_Purchase_OK_LockIn", "Player_EarnDrop",
+			"Transition_2", "Transition_2_Quit", "Transition_3", "Environment_Desert"
+		}, includeDrumRoll: false);
 
 		// ── 씬 저장 ──
 		string scenePath = "Assets/Scenes/GameExploreScene.unity";

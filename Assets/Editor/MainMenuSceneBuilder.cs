@@ -140,6 +140,12 @@ public static class MainMenuSceneBuilder
 		UnityEventTools.AddPersistentListener(settingsButtonComponent.onClick, buttonHandler.OnSettingsClicked);
 		UnityEventTools.AddPersistentListener(creditsButtonComponent.onClick, buttonHandler.OnCreditsClicked);
 
+		// ── 오디오 매니저 ─────────────────────────────────────────
+		SceneBuilderUtility.BuildAudioManager(new[]
+		{
+			"UI_Click", "UI_OK", "Transition_2"
+		}, includeDrumRoll: false);
+
 		// ── 씬 저장 ─────────────────────────────────────────────────
 		Directory.CreateDirectory("Assets/Scenes");
 		EditorSceneManager.SaveScene(scene, ScenePath);

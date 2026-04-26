@@ -12,6 +12,8 @@ public class PlayerDeathAnimator : MonoBehaviour
 	[SerializeField] Image playerBody;
 	[SerializeField] Sprite[] deathSprites;
 	[SerializeField] Image screenDimmer;
+	[SerializeField] PlayerBodyAnimator bodyAnimator;
+	[SerializeField] float frameRate = 30f;
 
 	/// <summary>
 	/// 사망 애니메이션을 재생한다.
@@ -26,18 +28,16 @@ public class PlayerDeathAnimator : MonoBehaviour
 			yield break;
 		}
 
-		// 호흡 애니메이션 정지
-		var spriteAnim = playerBody.GetComponent<SpriteAnimator>();
-		if (spriteAnim != null)
-			spriteAnim.enabled = false;
+		// 바디 자동 애니메이션 정지
+		if (bodyAnimator != null)
+			bodyAnimator.PauseAuto();
 
 		// 캐릭터 방향에 맞게 Y축 쿼터니언 회전으로 좌우반전
 		// 스프라이트 원본이 왼쪽을 향하므로 오른쪽 전환 시 Y축 180도 회전
 		float yAngle = facingRight ? 180f : 0f;
 		playerBody.rectTransform.localRotation = Quaternion.Euler(0f, yAngle, 0f);
 
-		// 스프라이트 시퀀스 재생 (30fps 기준)
-		float frameDuration = 1f / 30f;
+		float frameDuration = 1f / Mathf.Max(1f, frameRate);
 		for (int i = 0; i < deathSprites.Length; i++)
 		{
 			if (deathSprites[i] != null)

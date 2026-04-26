@@ -1,6 +1,6 @@
 // Assets/Editor/CharacterSelectSceneBuilder.cs
 // Unity 메뉴 → Tools → Build CharacterSelect Scene 으로 씬을 자동 생성합니다.
-// 씬이 이미 존재하면 덮어쓸지 물어봅니다.
+// 컷씬 슬라이드 + 무기 선택 화면을 프로그래밍 방식으로 빌드합니다.
 
 using System.IO;
 using UnityEditor;
@@ -11,11 +11,23 @@ using UnityEngine.UI;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem.UI;
 using TMPro;
+using Mahjong;
 using SBU = SceneBuilderUtility;
 
 public static class CharacterSelectSceneBuilder
 {
 	private const string ScenePath = "Assets/Scenes/CharacterSelect.unity";
+
+	// ── 슬라이드 색상 ──
+	static readonly Color BgColor         = new Color(0.06f, 0.07f, 0.13f, 1f);
+	static readonly Color SlideHolder1    = new Color(0.15f, 0.22f, 0.35f, 1f);
+	static readonly Color SlideHolder2    = new Color(0.20f, 0.15f, 0.30f, 1f);
+	static readonly Color WeaponBgColor   = new Color(0.10f, 0.12f, 0.20f, 1f);
+	static readonly Color MahjongColor    = new Color(0.20f, 0.65f, 0.40f, 1f);
+	static readonly Color HoldemColor     = new Color(0.50f, 0.25f, 0.70f, 1f);
+	static readonly Color DiceColor       = new Color(0.85f, 0.85f, 0.90f, 1f);
+	static readonly Color SubtitleBgColor = new Color(0.04f, 0.04f, 0.08f, 0.55f);
+	static readonly Color LabelColor      = new Color(0.92f, 0.92f, 1f, 1f);
 
 	[MenuItem("Tools/Build CharacterSelect Scene")]
 	public static void Build()
@@ -33,579 +45,431 @@ public static class CharacterSelectSceneBuilder
 		var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
 		// ── 카메라 ──────────────────────────────────────────────────
-		var cameraObject = new GameObject("MainCamera");
-		cameraObject.tag = "MainCamera";
-		var mainCamera = cameraObject.AddComponent<Camera>();
-		mainCamera.clearFlags = CameraClearFlags.SolidColor;
-		mainCamera.backgroundColor = new Color(0.09f, 0.09f, 0.15f, 1f);
-		mainCamera.orthographic = true;
-		mainCamera.orthographicSize = 5f;
-		cameraObject.transform.position = new Vector3(0, 0, -10);
-		cameraObject.AddComponent<AudioListener>();
-
-		// ── 월드 스페이스 캐릭터 미리보기 오브젝트 ───────────────────
-		// 실제 스프라이트/애니메이터가 할당되면 이 오브젝트를 통해 재생됩니다.
-		// 현재는 빈 컴포넌트만 부착되며 SpriteRenderer에 스프라이트가 없어 보이지 않습니다.
-		var characterPreviewObject = new GameObject("CharacterPreviewObject");
-		characterPreviewObject.transform.position = new Vector3(0f, 0.5f, 0f);
-		var previewSpriteRenderer = characterPreviewObject.AddComponent<SpriteRenderer>();
-		var previewAnimator = characterPreviewObject.AddComponent<Animator>();
+		var cameraGo = new GameObject("MainCamera");
+		cameraGo.tag = "MainCamera";
+		var cam = cameraGo.AddComponent<Camera>();
+		cam.clearFlags = CameraClearFlags.SolidColor;
+		cam.backgroundColor = new Color(0.09f, 0.09f, 0.15f, 1f);
+		cam.orthographic = true;
+		cam.orthographicSize = 5f;
+		cameraGo.transform.position = new Vector3(0, 0, -10);
+		cameraGo.AddComponent<AudioListener>();
 
 		// ── Canvas ──────────────────────────────────────────────────
-		var canvasObject = new GameObject("Canvas");
-		var canvas = canvasObject.AddComponent<Canvas>();
+		var canvasGo = new GameObject("Canvas");
+		var canvas = canvasGo.AddComponent<Canvas>();
 		canvas.renderMode = RenderMode.ScreenSpaceOverlay;
 
-		var canvasScaler = canvasObject.AddComponent<CanvasScaler>();
-		canvasScaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-		canvasScaler.referenceResolution = new Vector2(1920, 1080);
-		canvasScaler.matchWidthOrHeight = 0.5f;
+		var scaler = canvasGo.AddComponent<CanvasScaler>();
+		scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+		scaler.referenceResolution = new Vector2(1920, 1080);
+		scaler.matchWidthOrHeight = 0.5f;
 
-		canvasObject.AddComponent<GraphicRaycaster>();
+		canvasGo.AddComponent<GraphicRaycaster>();
 
-		// ── EventSystem ──────────────────────────────────────────────
-		var eventSystemObject = new GameObject("EventSystem");
-		eventSystemObject.AddComponent<EventSystem>();
-		eventSystemObject.AddComponent<InputSystemUIInputModule>();
-
-		// ── CharacterSelectRoot ───────────────────────────────────────
-		var characterSelectRootObject = new GameObject("CharacterSelectRoot");
+		// ── EventSystem ─────────────────────────────────────────────
+		var eventGo = new GameObject("EventSystem");
+		eventGo.AddComponent<EventSystem>();
+		eventGo.AddComponent<InputSystemUIInputModule>();
 
 		// ── 배경 ────────────────────────────────────────────────────
-		var backgroundObject = SBU.CreateUIPanel(canvasObject.transform, "Background",
-			new Color(0.06f, 0.07f, 0.13f, 1f));
-		SetStretch(backgroundObject);
+		var bgPanel = SBU.CreateUIPanel(canvasGo.transform, "Background", BgColor);
+		var bgRt = bgPanel.GetComponent<RectTransform>();
+		bgRt.anchorMin = Vector2.zero;
+		bgRt.anchorMax = Vector2.one;
+		bgRt.offsetMin = Vector2.zero;
+		bgRt.offsetMax = Vector2.zero;
 
-		var topGradientObject = SBU.CreateUIPanel(backgroundObject.transform, "BackgroundTopGradient",
-			new Color(0.12f, 0.13f, 0.22f, 0.5f));
-		var topGradientTransform = topGradientObject.GetComponent<RectTransform>();
-		topGradientTransform.anchorMin = new Vector2(0, 0.5f);
-		topGradientTransform.anchorMax = new Vector2(1, 1f);
-		topGradientTransform.offsetMin = Vector2.zero;
-		topGradientTransform.offsetMax = Vector2.zero;
+		// ── FadeGroup (CanvasGroup) ─────────────────────────────────
+		var fadeGo = new GameObject("FadeGroup");
+		fadeGo.transform.SetParent(canvasGo.transform, false);
+		var fadeRt = fadeGo.AddComponent<RectTransform>();
+		SBU.Stretch(fadeRt);
+		var fadeCanvasGroup = fadeGo.AddComponent<CanvasGroup>();
+		fadeCanvasGroup.alpha = 1f;
 
-		CreateDecorationLine(backgroundObject.transform, "DecorationLineTop",
-			0.88f, new Color(0.3f, 0.5f, 0.9f, 0.15f));
-		CreateDecorationLine(backgroundObject.transform, "DecorationLineBottom",
-			0.14f, new Color(0.3f, 0.5f, 0.9f, 0.10f));
+		// ── 슬라이드 컨테이너 ────────────────────────────────────────
+		var slidesContainer = SBU.CreateEmpty(fadeGo.transform, "SlidesContainer");
+		SBU.Stretch(slidesContainer);
 
-		// ── 타이틀 텍스트 ────────────────────────────────────────────
-		var titleTmp = SBU.CreateTMPText(canvasObject.transform, "TitleText",
-			"캐릭터 선택", 60, new Color(0.95f, 0.95f, 1f, 1f),
-			TextAlignmentOptions.Center, FontStyles.Bold);
-		var titleTextTransform = titleTmp.GetComponent<RectTransform>();
-		titleTextTransform.anchorMin = new Vector2(0.1f, 0.88f);
-		titleTextTransform.anchorMax = new Vector2(0.9f, 1.0f);
-		titleTextTransform.offsetMin = Vector2.zero;
-		titleTextTransform.offsetMax = Vector2.zero;
+		// ── 슬라이드 1: 숲에서 돌아다니던 당신(다람쥐)... ────────────
+		var slide1Top = BuildImageSlide(slidesContainer, "Slide1TopContent",
+			SlideHolder1, "컷씬 1", "Assets/Mobs/Story_CutScene_0.png");
 
-		// ── 좌측 화살표 버튼 ─────────────────────────────────────────
-		var leftArrowButtonObject = CreateArrowButton(canvasObject.transform, "LeftArrowButton", "◁");
-		var leftArrowButtonTransform = leftArrowButtonObject.GetComponent<RectTransform>();
-		leftArrowButtonTransform.anchorMin = new Vector2(0.46f, 0.55f);
-		leftArrowButtonTransform.anchorMax = new Vector2(0.51f, 0.75f);
-		leftArrowButtonTransform.offsetMin = Vector2.zero;
-		leftArrowButtonTransform.offsetMax = Vector2.zero;
+		// ── 슬라이드 2: 적들과 조우하게 되는데...! ────────────────────
+		var slide2Top = BuildImageSlide(slidesContainer, "Slide2TopContent",
+			SlideHolder2, "컷씬 2", "Assets/Mobs/Story_CutScene_1.png");
+		slide2Top.SetActive(false);
 
-		// ── 우측 화살표 버튼 ─────────────────────────────────────────
-		var rightArrowButtonObject = CreateArrowButton(canvasObject.transform, "RightArrowButton", "▷");
-		var rightArrowButtonTransform = rightArrowButtonObject.GetComponent<RectTransform>();
-		rightArrowButtonTransform.anchorMin = new Vector2(0.89f, 0.55f);
-		rightArrowButtonTransform.anchorMax = new Vector2(0.94f, 0.75f);
-		rightArrowButtonTransform.offsetMin = Vector2.zero;
-		rightArrowButtonTransform.offsetMax = Vector2.zero;
+		// ── 슬라이드 3: 무기 선택 ────────────────────────────────────
+		var slide3Top = BuildWeaponSelectSlide(slidesContainer,
+			"Assets/Mobs/Story_CutScene_2.png");
+		slide3Top.SetActive(false);
 
-		// ── 캐릭터 미리보기 영역 ──────────────────────────────────────
-		var characterPreviewAreaObject = BuildCharacterPreviewArea(canvasObject.transform);
+		// ── 하단 자막 영역 ──────────────────────────────────────────
+		var subtitleBg = SBU.CreateImage(fadeGo.transform, "SubtitleBackground",
+			SubtitleBgColor, false);
+		subtitleBg.anchorMin = new Vector2(0f, 0f);
+		subtitleBg.anchorMax = new Vector2(1f, 0.20f);
+		subtitleBg.offsetMin = Vector2.zero;
+		subtitleBg.offsetMax = Vector2.zero;
 
-		// ── 캐릭터 정보 영역 ──────────────────────────────────────────
-		var characterInfoAreaResult = BuildCharacterInfoArea(canvasObject.transform);
+		var subtitleTmp = SBU.CreateTMPText(fadeGo.transform, "SubtitleText",
+			"숲에서 돌아다니던 당신(다람쥐)...", 44, LabelColor,
+			TextAlignmentOptions.Center, FontStyles.Normal);
+		var subtitleRt = subtitleTmp.GetComponent<RectTransform>();
+		subtitleRt.anchorMin = new Vector2(0.05f, 0.03f);
+		subtitleRt.anchorMax = new Vector2(0.95f, 0.17f);
+		subtitleRt.offsetMin = Vector2.zero;
+		subtitleRt.offsetMax = Vector2.zero;
+		subtitleTmp.textWrappingMode = TextWrappingModes.Normal;
+		subtitleTmp.enableWordWrapping = true;
 
-		// ── 하단 버튼 영역 ────────────────────────────────────────────
-		var backButtonObject = CreateMenuButton(canvasObject.transform, "BackButton", "◁  뒤로");
-		var backButtonTransform = backButtonObject.GetComponent<RectTransform>();
-		backButtonTransform.anchorMin = new Vector2(0.10f, 0.02f);
-		backButtonTransform.anchorMax = new Vector2(0.38f, 0.13f);
-		backButtonTransform.offsetMin = Vector2.zero;
-		backButtonTransform.offsetMax = Vector2.zero;
+		// ── ClickCatcher (전체화면 투명 버튼) ────────────────────────
+		var clickCatcherGo = new GameObject("ClickCatcher");
+		clickCatcherGo.transform.SetParent(canvasGo.transform, false);
+		var clickRt = clickCatcherGo.AddComponent<RectTransform>();
+		SBU.Stretch(clickRt);
+		var clickImg = clickCatcherGo.AddComponent<Image>();
+		clickImg.color = new Color(0, 0, 0, 0);
+		clickImg.raycastTarget = true;
+		clickCatcherGo.AddComponent<Button>().transition = Selectable.Transition.None;
 
-		var startButtonObject = CreateMenuButton(canvasObject.transform, "StartButton", "▷  시작");
-		var startButtonTransform = startButtonObject.GetComponent<RectTransform>();
-		startButtonTransform.anchorMin = new Vector2(0.62f, 0.02f);
-		startButtonTransform.anchorMax = new Vector2(0.90f, 0.13f);
-		startButtonTransform.offsetMin = Vector2.zero;
-		startButtonTransform.offsetMax = Vector2.zero;
+		// ── Skip / Back 버튼 — 반투명 배경 ─────────────────────────
+		var btnNormal = new Color(0.10f, 0.12f, 0.25f, 0.45f);
+		var btnHover  = new Color(0.20f, 0.25f, 0.50f, 0.65f);
+		var btnPress  = new Color(0.06f, 0.08f, 0.18f, 0.70f);
 
-		// ── 주사위 규칙 간략 설명 ────────────────────────────────────────
-		var diceRulesArea = BuildDiceRulesArea(canvasObject.transform);
+		var skipGo = SBU.CreateButton(canvasGo.transform, "SkipButton", "Skip ▷▷",
+			36, btnNormal, btnHover, btnPress);
+		var skipRt = skipGo.GetComponent<RectTransform>();
+		skipRt.anchorMin = new Vector2(0.82f, 0.02f);
+		skipRt.anchorMax = new Vector2(0.98f, 0.08f);
+		skipRt.offsetMin = Vector2.zero;
+		skipRt.offsetMax = Vector2.zero;
 
-		// ── 주사위 세부 규칙 팝업 ─────────────────────────────────────────
-		var rulesDimmer = SBU.CreateDimmer(canvasObject.transform, "RulesDimmer");
-		var rulesPopup = BuildDiceRulesPopup(canvasObject.transform);
-		SetPrivateField(rulesPopup.GetComponent<SimplePopup>(), "dimmer",
-			rulesDimmer.GetComponent<Image>());
+		var backGo = SBU.CreateButton(canvasGo.transform, "BackButton", "◁ 뒤로",
+			36, btnNormal, btnHover, btnPress);
+		var backRt = backGo.GetComponent<RectTransform>();
+		backRt.anchorMin = new Vector2(0.02f, 0.02f);
+		backRt.anchorMax = new Vector2(0.18f, 0.08f);
+		backRt.offsetMin = Vector2.zero;
+		backRt.offsetMax = Vector2.zero;
 
-		// 세부 규칙 버튼 → 팝업 열기
+		// ── 컨트롤러 셋업 ───────────────────────────────────────────
+		var controllerGo = new GameObject("CutsceneController");
+		var controller = controllerGo.AddComponent<CharacterSelectController>();
+
+		// CutsceneSlide 배열 구성
+		var slideArray = new CutsceneSlide[]
+		{
+			new CutsceneSlide
+			{
+				subtitleText = "숲에서 돌아다니던 당신(다람쥐)...",
+				topContent = slide1Top,
+				isWeaponSelect = false,
+			},
+			new CutsceneSlide
+			{
+				subtitleText = "적들과 조우하게 되는데...!",
+				topContent = slide2Top,
+				isWeaponSelect = false,
+			},
+			new CutsceneSlide
+			{
+				subtitleText = "당신의 눈앞에 떨어진 무기는?",
+				topContent = slide3Top,
+				isWeaponSelect = true,
+			},
+		};
+
+		SBU.SetField(controller, "slides", slideArray);
+		SBU.SetField(controller, "subtitleText", subtitleTmp);
+		SBU.SetField(controller, "clickCatcher", clickCatcherGo);
+		SBU.SetField(controller, "skipButton", skipGo);
+		SBU.SetField(controller, "fadeGroup", fadeCanvasGroup);
+
+		// ── 버튼 이벤트 연결 ────────────────────────────────────────
 		UnityEventTools.AddPersistentListener(
-			diceRulesArea.DetailButton.onClick,
-			rulesPopup.GetComponent<SimplePopup>().Open);
+			clickCatcherGo.GetComponent<Button>().onClick,
+			controller.AdvanceSlide);
 
-		// ── 미구현 캐릭터 팝업 ─────────────────────────────────────────
-		var unavailablePopupResult = BuildUnavailablePopup(canvasObject.transform);
+		UnityEventTools.AddPersistentListener(
+			skipGo.GetComponent<Button>().onClick,
+			controller.SkipToWeaponSelect);
 
-		// ── CharacterSelectController 컴포넌트 부착 및 참조 연결 ─────────
-		var characterSelectController = characterSelectRootObject.AddComponent<CharacterSelectController>();
+		UnityEventTools.AddPersistentListener(
+			backGo.GetComponent<Button>().onClick,
+			controller.OnBackClicked);
 
-		// 미리보기 오브젝트 연결
-		SetPrivateField(characterSelectController, "worldPreviewAnimator", previewAnimator);
-		SetPrivateField(characterSelectController, "worldPreviewSpriteRenderer", previewSpriteRenderer);
-		SetPrivateField(characterSelectController, "previewFallbackImage",
-			characterPreviewAreaObject.GetComponentInChildren<Image>());
+		// 무기 버튼 이벤트
+		var mahjongBtn = slide3Top.transform.Find("WeaponButtonsRow/Btn_Mahjong");
+		var holdemBtn  = slide3Top.transform.Find("WeaponButtonsRow/Btn_Holdem");
+		var diceBtn    = slide3Top.transform.Find("WeaponButtonsRow/Btn_Dice");
 
-		// 정보 텍스트 연결
-		SetPrivateField(characterSelectController, "characterNameText", characterInfoAreaResult.NameText);
-		SetPrivateField(characterSelectController, "conceptDescriptionText", characterInfoAreaResult.ConceptText);
-		SetPrivateField(characterSelectController, "attackDescriptionText", characterInfoAreaResult.AttackText);
+		if (mahjongBtn != null)
+			UnityEventTools.AddPersistentListener(
+				mahjongBtn.GetComponent<Button>().onClick,
+				controller.OnWeaponSelected_Mahjong);
 
-		// 팝업 연결
-		SetPrivateField(characterSelectController, "unavailablePopup", unavailablePopupResult.Popup);
-		SetPrivateField(characterSelectController, "unavailableMessageText", unavailablePopupResult.MessageText);
+		if (holdemBtn != null)
+			UnityEventTools.AddPersistentListener(
+				holdemBtn.GetComponent<Button>().onClick,
+				controller.OnWeaponSelected_Holdem);
 
-		// 규칙 패널 연결
-		SetPrivateField(characterSelectController, "rulesTitle", diceRulesArea.TitleText);
-		SetPrivateField(characterSelectController, "rulesBody", diceRulesArea.BodyText);
-		SetPrivateField(characterSelectController, "rulesDetailButton",
-			diceRulesArea.DetailButton.gameObject);
+		if (diceBtn != null)
+			UnityEventTools.AddPersistentListener(
+				diceBtn.GetComponent<Button>().onClick,
+				controller.OnWeaponSelected_Dice);
 
-		// 기본 캐릭터 데이터 설정
-		string diceExplSpritePath = "Assets/Mobs/DiceGambler_explanation_sample.png";
-		SBU.EnsureTightSprite(diceExplSpritePath);
-		var diceExplSprite = AssetDatabase.LoadAssetAtPath<Sprite>(diceExplSpritePath);
-		var defaultCharacters = CreateDefaultCharacters();
-		if (diceExplSprite != null)
-			defaultCharacters[2].previewSprite = diceExplSprite;
-		SetPrivateField(characterSelectController, "characters", defaultCharacters);
+		// ── AudioManager ────────────────────────────────────────────
+		SBU.BuildAudioManager(new[]
+		{
+			"UI_Click", "UI_OK", "UI_Back_NO",
+			"Transition_2", "Transition_2_Quit",
+		}, false);
 
-		// ── 버튼 이벤트 연결 ─────────────────────────────────────────
-		var leftArrowButton = leftArrowButtonObject.GetComponent<Button>();
-		var rightArrowButton = rightArrowButtonObject.GetComponent<Button>();
-		var startButton = startButtonObject.GetComponent<Button>();
-		var backButton = backButtonObject.GetComponent<Button>();
-
-		UnityEventTools.AddPersistentListener(leftArrowButton.onClick, characterSelectController.SelectPrevious);
-		UnityEventTools.AddPersistentListener(rightArrowButton.onClick, characterSelectController.SelectNext);
-		UnityEventTools.AddPersistentListener(startButton.onClick, characterSelectController.OnStartClicked);
-		UnityEventTools.AddPersistentListener(backButton.onClick, characterSelectController.OnBackClicked);
-
-		// ── 씬 저장 ─────────────────────────────────────────────────
-		Directory.CreateDirectory("Assets/Scenes");
+		// ── 씬 저장 ────────────────────────────────────────────────
+		SBU.EnsureDirectory("Assets/Scenes");
 		EditorSceneManager.SaveScene(scene, ScenePath);
-
-		AddSceneToBuildSettings(ScenePath);
+		SBU.AddSceneToBuildSettings(ScenePath);
 
 		EditorUtility.DisplayDialog("완료",
-			$"CharacterSelect 씬이 {ScenePath} 에 생성되었습니다.\n\n" +
-			"★ Inspector 추가 연결 항목:\n" +
-			"  CharacterSelectRoot → CharacterSelectController → characters 배열:\n" +
-			"    각 캐릭터의 previewAnimatorController, previewSprite를\n" +
-			"    에셋이 준비된 후 Inspector에서 연결하세요.\n\n" +
-			"  CharacterPreviewObject → CharacterPreviewObject의 Animator에\n" +
-			"    실제 애니메이터 컨트롤러가 생기면 CharacterData에 연결하세요.\n\n" +
-			"현재는 previewFallbackColor로 플레이스홀더가 표시됩니다.",
-			"확인");
+			$"CharacterSelect 씬이 생성되었습니다.\n{ScenePath}", "확인");
 	}
 
-	// ─────────────────────────────────────────────────────────────────
-	//  복합 영역 생성 메서드
-	// ─────────────────────────────────────────────────────────────────
+	// ── 헬퍼: 이미지 슬라이드 ───────────────────────────────────────
 
-	private static GameObject BuildCharacterPreviewArea(Transform canvasParent)
+	/// <summary>
+	/// 전체 화면 영역에 스프라이트(있으면) 또는 색상 플레이스홀더를 배치한 슬라이드 GO를 반환.
+	/// 자막바가 이미지 위에 반투명으로 뜨므로 이미지는 화면 전체를 채운다.
+	/// </summary>
+	static GameObject BuildImageSlide(RectTransform parent, string name,
+		Color holderColor, string labelText, string spritePath = null)
 	{
-		var previewAreaObject = new GameObject("CharacterPreviewArea");
-		var previewAreaTransform = previewAreaObject.AddComponent<RectTransform>();
-		previewAreaTransform.SetParent(canvasParent, false);
-		previewAreaTransform.anchorMin = new Vector2(0.52f, 0.42f);
-		previewAreaTransform.anchorMax = new Vector2(0.88f, 0.86f);
-		previewAreaTransform.offsetMin = Vector2.zero;
-		previewAreaTransform.offsetMax = Vector2.zero;
+		var go = new GameObject(name);
+		go.transform.SetParent(parent, false);
+		var rt = go.AddComponent<RectTransform>();
+		SBU.Stretch(rt);
 
-		// 플레이스홀더 이미지 (캐릭터 애니메이터가 없을 때 표시)
-		var fallbackImageObject = SBU.CreateUIPanel(previewAreaObject.transform, "FallbackPreviewImage",
-			new Color(0.25f, 0.38f, 0.75f, 1f));
-		var fallbackImageTransform = fallbackImageObject.GetComponent<RectTransform>();
-		fallbackImageTransform.anchorMin = new Vector2(0.08f, 0.06f);
-		fallbackImageTransform.anchorMax = new Vector2(0.92f, 0.94f);
-		fallbackImageTransform.offsetMin = Vector2.zero;
-		fallbackImageTransform.offsetMax = Vector2.zero;
-		var fallbackImg = fallbackImageObject.GetComponent<Image>();
-		fallbackImg.preserveAspect = true;
-		fallbackImg.useSpriteMesh = true;
-
-		return previewAreaObject;
-	}
-
-	private struct CharacterInfoAreaResult
-	{
-		public TMP_Text NameText;
-		public TMP_Text ConceptText;
-		public TMP_Text AttackText;
-	}
-
-	private static CharacterInfoAreaResult BuildCharacterInfoArea(Transform canvasParent)
-	{
-		var infoAreaObject = new GameObject("CharacterInfoArea");
-		var infoAreaTransform = infoAreaObject.AddComponent<RectTransform>();
-		infoAreaTransform.SetParent(canvasParent, false);
-		infoAreaTransform.anchorMin = new Vector2(0.15f, 0.15f);
-		infoAreaTransform.anchorMax = new Vector2(0.85f, 0.42f);
-		infoAreaTransform.offsetMin = Vector2.zero;
-		infoAreaTransform.offsetMax = Vector2.zero;
-
-		// 정보 영역 배경
-		var infoBackgroundObject = SBU.CreateUIPanel(infoAreaObject.transform, "InfoBackground",
-			new Color(0.08f, 0.10f, 0.20f, 0.85f));
-		SetStretch(infoBackgroundObject);
-
-		// 캐릭터 이름
-		var nameTmp = SBU.CreateTMPText(infoAreaObject.transform, "CharacterNameText",
-			"작사", 44, new Color(0.95f, 0.95f, 1f, 1f),
-			TextAlignmentOptions.MidlineLeft, FontStyles.Bold);
-		var nameTextTransform = nameTmp.GetComponent<RectTransform>();
-		nameTextTransform.anchorMin = new Vector2(0.04f, 0.72f);
-		nameTextTransform.anchorMax = new Vector2(0.96f, 1.0f);
-		nameTextTransform.offsetMin = Vector2.zero;
-		nameTextTransform.offsetMax = Vector2.zero;
-
-		// 구분선
-		CreateDecorationLine(infoAreaObject.transform, "NameDivider", 0.70f,
-			new Color(0.3f, 0.5f, 0.9f, 0.5f));
-
-		// 컨셉 설명
-		var conceptText = SBU.CreateTMPText(infoAreaObject.transform, "ConceptDescriptionText",
-			"패의 조합으로 강력한 공격을 연출하는 전투 전문가.", 30,
-			new Color(0.82f, 0.85f, 1f, 0.9f), TextAlignmentOptions.TopLeft);
-		conceptText.textWrappingMode = TextWrappingModes.Normal;
-		var conceptTextTransform = conceptText.GetComponent<RectTransform>();
-		conceptTextTransform.anchorMin = new Vector2(0.04f, 0.38f);
-		conceptTextTransform.anchorMax = new Vector2(0.96f, 0.68f);
-		conceptTextTransform.offsetMin = Vector2.zero;
-		conceptTextTransform.offsetMax = Vector2.zero;
-
-		// 공격 스타일 설명
-		var attackText = SBU.CreateTMPText(infoAreaObject.transform, "AttackDescriptionText",
-			"패를 투척해 적을 공격한다. 패를 조합해 연속 공격과 광역기를 발동한다.", 28,
-			new Color(0.65f, 0.78f, 1f, 0.85f), TextAlignmentOptions.TopLeft, FontStyles.Italic);
-		attackText.textWrappingMode = TextWrappingModes.Normal;
-		var attackTextTransform = attackText.GetComponent<RectTransform>();
-		attackTextTransform.anchorMin = new Vector2(0.04f, 0.04f);
-		attackTextTransform.anchorMax = new Vector2(0.96f, 0.36f);
-		attackTextTransform.offsetMin = Vector2.zero;
-		attackTextTransform.offsetMax = Vector2.zero;
-
-		return new CharacterInfoAreaResult
+		// 스프라이트 로드 시도
+		Sprite sprite = null;
+		if (!string.IsNullOrEmpty(spritePath) && System.IO.File.Exists(spritePath))
 		{
-			NameText = nameTmp,
-			ConceptText = conceptText,
-			AttackText = attackText,
-		};
-	}
+			SBU.EnsurePixelSprite(spritePath);
+			sprite = AssetDatabase.LoadAssetAtPath<Sprite>(spritePath);
+		}
 
-	private struct UnavailablePopupResult
-	{
-		public SimplePopup Popup;
-		public TMP_Text MessageText;
-	}
-
-	private static UnavailablePopupResult BuildUnavailablePopup(Transform canvasParent)
-	{
-		var popupObject = SBU.CreateUIPanel(canvasParent, "UnavailablePopup",
-			new Color(0.08f, 0.09f, 0.18f, 0.97f));
-		CenterPopup(popupObject, 500, 280);
-		var simplePopup = popupObject.AddComponent<SimplePopup>();
-
-		// 제목
-		var titleTmp = SBU.CreateTMPText(popupObject.transform, "TitleText",
-			"알림", 38, Color.white, TextAlignmentOptions.Center, FontStyles.Bold);
-		var titleTextTransform = titleTmp.GetComponent<RectTransform>();
-		titleTextTransform.anchorMin = new Vector2(0, 0.72f);
-		titleTextTransform.anchorMax = new Vector2(1, 1f);
-		titleTextTransform.offsetMin = Vector2.zero;
-		titleTextTransform.offsetMax = Vector2.zero;
-
-		// 메시지 텍스트 (CharacterSelectController가 내용을 채워 넣음)
-		var messageText = SBU.CreateTMPText(popupObject.transform, "MessageText",
-			"아직 개발되지 않음", 26, new Color(0.82f, 0.85f, 1f, 1f),
-			TextAlignmentOptions.Center);
-		messageText.textWrappingMode = TextWrappingModes.Normal;
-		var messageTextTransform = messageText.GetComponent<RectTransform>();
-		messageTextTransform.anchorMin = new Vector2(0.06f, 0.32f);
-		messageTextTransform.anchorMax = new Vector2(0.94f, 0.70f);
-		messageTextTransform.offsetMin = Vector2.zero;
-		messageTextTransform.offsetMax = Vector2.zero;
-
-		// 닫기 버튼
-		var closeButtonObject = CreateMenuButton(popupObject.transform, "CloseButton", "✕  닫기");
-		var closeButtonTransform = closeButtonObject.GetComponent<RectTransform>();
-		closeButtonTransform.anchorMin = new Vector2(0.28f, 0.05f);
-		closeButtonTransform.anchorMax = new Vector2(0.72f, 0.26f);
-		closeButtonTransform.offsetMin = Vector2.zero;
-		closeButtonTransform.offsetMax = Vector2.zero;
-		UnityEventTools.AddPersistentListener(closeButtonObject.GetComponent<Button>().onClick, simplePopup.Close);
-
-		popupObject.SetActive(false);
-
-		return new UnavailablePopupResult
+		if (sprite != null)
 		{
-			Popup = simplePopup,
-			MessageText = messageText,
-		};
-	}
-
-	private struct DiceRulesAreaResult
-	{
-		public Button DetailButton;
-		public TMP_Text TitleText;
-		public TMP_Text BodyText;
-	}
-
-	private static DiceRulesAreaResult BuildDiceRulesArea(Transform canvasParent)
-	{
-		var area = new GameObject("DiceRulesArea");
-		var areaRect = area.AddComponent<RectTransform>();
-		areaRect.SetParent(canvasParent, false);
-		areaRect.anchorMin = new Vector2(0.05f, 0.42f);
-		areaRect.anchorMax = new Vector2(0.44f, 0.86f);
-		areaRect.offsetMin = Vector2.zero;
-		areaRect.offsetMax = Vector2.zero;
-
-		// 배경
-		var bg = SBU.CreateUIPanel(area.transform, "RulesBg", new Color(0.08f, 0.10f, 0.20f, 0.85f));
-		SetStretch(bg);
-
-		// 제목
-		var titleTmp = SBU.CreateTMPText(area.transform, "RulesTitle",
-			"주사위 전투 규칙", 26, new Color(0.95f, 0.95f, 1f, 1f),
-			TextAlignmentOptions.Center, FontStyles.Bold);
-		var titleRt = titleTmp.GetComponent<RectTransform>();
-		titleRt.anchorMin = new Vector2(0.05f, 0.88f);
-		titleRt.anchorMax = new Vector2(0.95f, 0.98f);
-		titleRt.offsetMin = Vector2.zero;
-		titleRt.offsetMax = Vector2.zero;
-
-		// 간략 설명
-		var bodyLines = new string[]
+			var imgGo = new GameObject("CutsceneImage");
+			imgGo.transform.SetParent(go.transform, false);
+			var imgRt = imgGo.AddComponent<RectTransform>();
+			SBU.Stretch(imgRt);
+			var img = imgGo.AddComponent<Image>();
+			img.sprite = sprite;
+			img.color = Color.white;
+			img.preserveAspect = true;
+			img.raycastTarget = false;
+		}
+		else
 		{
-			"5개의 주사위를 굴려",
-			"눈의 합으로 데미지를 준다.",
-			"",
-			"<color=#FFD94A>족보를 맞추면</color>",
-			"<color=#FFD94A>고정 데미지 + 광역 50%!</color>",
-			"",
-			"<color=#AAAAAA>· Small Straight</color>  4연속",
-			"<color=#AAAAAA>· Full House</color>  2+3",
-			"<color=#AAAAAA>· Large Straight</color>  5연속",
-			"<color=#AAAAAA>· 4 of a Kind</color>  4개 동일",
-			"<color=#FFD94A>· YACHT</color>  5개 동일!",
-		};
-		var bodyTmp = SBU.CreateTMPText(area.transform, "RulesBody",
-			string.Join("\n", bodyLines), 20,
-			new Color(0.82f, 0.85f, 1f, 0.95f), TextAlignmentOptions.TopLeft);
-		bodyTmp.textWrappingMode = TextWrappingModes.Normal;
-		bodyTmp.richText = true;
-		var bodyRt = bodyTmp.GetComponent<RectTransform>();
-		bodyRt.anchorMin = new Vector2(0.06f, 0.18f);
-		bodyRt.anchorMax = new Vector2(0.94f, 0.86f);
-		bodyRt.offsetMin = Vector2.zero;
-		bodyRt.offsetMax = Vector2.zero;
+			var imgRt = SBU.CreateImage(go.transform, "PlaceholderImage", holderColor, false);
+			SBU.Stretch(imgRt);
 
-		// 세부 규칙 버튼
-		var detailBtn = CreateMenuButton(area.transform, "DetailButton", "세부 규칙 ▷");
-		detailBtn.GetComponentInChildren<TMP_Text>().fontSize = 22;
-		var detailRt = detailBtn.GetComponent<RectTransform>();
-		detailRt.anchorMin = new Vector2(0.10f, 0.03f);
-		detailRt.anchorMax = new Vector2(0.90f, 0.15f);
-		detailRt.offsetMin = Vector2.zero;
-		detailRt.offsetMax = Vector2.zero;
+			var label = SBU.CreateTMPText(go.transform, "PlaceholderLabel", labelText,
+				60, new Color(1f, 1f, 1f, 0.6f),
+				TextAlignmentOptions.Center, FontStyles.Bold);
+			var labelRt = label.GetComponent<RectTransform>();
+			SBU.Stretch(labelRt);
+		}
 
-		return new DiceRulesAreaResult
-		{
-			DetailButton = detailBtn.GetComponent<Button>(),
-			TitleText = titleTmp,
-			BodyText = bodyTmp,
-		};
-	}
-
-	private static GameObject BuildDiceRulesPopup(Transform canvasParent)
-	{
-		var popup = SBU.CreateUIPanel(canvasParent, "DiceRulesPopup",
-			new Color(0.08f, 0.09f, 0.18f, 0.97f));
-		CenterPopup(popup, 620, 480);
-		popup.AddComponent<SimplePopup>();
-
-		// 제목
-		var titleTmp = SBU.CreateTMPText(popup.transform, "Title", "주사위 족보 & 데미지",
-			36, Color.white, TextAlignmentOptions.Center, FontStyles.Bold);
-		var titleRt = titleTmp.GetComponent<RectTransform>();
-		titleRt.anchorMin = new Vector2(0, 0.86f);
-		titleRt.anchorMax = new Vector2(1, 0.98f);
-		titleRt.offsetMin = Vector2.zero;
-		titleRt.offsetMax = Vector2.zero;
-
-		// 세부 규칙 본문
-		var detailLines = new string[]
-		{
-			"<color=#AAAAAA>족보 없음</color>          주사위 합계 데미지 (광역 없음)",
-			"",
-			"<color=#AAAAAA>Small Straight</color>    4개 연속 (1-2-3-4 등)",
-			"                                  → <color=#FFD94A>20</color> 데미지",
-			"",
-			"<color=#AAAAAA>Full House</color>          2개+3개 조합 (A,A,B,B,B)",
-			"                                  → <color=#FFD94A>25</color> 데미지",
-			"",
-			"<color=#AAAAAA>Large Straight</color>   5개 연속",
-			"     1-2-3-4-5 → <color=#FFD94A>30</color>  /  2-3-4-5-6 → <color=#FFD94A>35</color>",
-			"",
-			"<color=#AAAAAA>4 of a Kind</color>        4개 동일 (A,A,A,A,B)",
-			"                                  → <color=#FFD94A>40</color> 데미지",
-			"",
-			"<color=#FFD94A>YACHT</color>                 5개 모두 동일!",
-			"                                  → <color=#FF5555>50</color> 데미지",
-			"",
-			"<color=#55AAFF>족보 발동 시 타겟 100% + 나머지 적 50% 광역</color>",
-		};
-		var bodyTmp = SBU.CreateTMPText(popup.transform, "DetailBody",
-			string.Join("\n", detailLines), 20,
-			new Color(0.88f, 0.90f, 1f, 1f), TextAlignmentOptions.TopLeft);
-		bodyTmp.textWrappingMode = TextWrappingModes.Normal;
-		bodyTmp.richText = true;
-		var bodyRt = bodyTmp.GetComponent<RectTransform>();
-		bodyRt.anchorMin = new Vector2(0.05f, 0.14f);
-		bodyRt.anchorMax = new Vector2(0.95f, 0.84f);
-		bodyRt.offsetMin = Vector2.zero;
-		bodyRt.offsetMax = Vector2.zero;
-
-		// 닫기 버튼 (좌상단 X, 호버 시 빨간색)
-		var closeBtn = new GameObject("CloseButton");
-		var closeBtnRt = closeBtn.AddComponent<RectTransform>();
-		closeBtnRt.SetParent(popup.transform, false);
-		closeBtnRt.anchorMin = new Vector2(0f, 0.88f);
-		closeBtnRt.anchorMax = new Vector2(0.10f, 1f);
-		closeBtnRt.offsetMin = Vector2.zero;
-		closeBtnRt.offsetMax = Vector2.zero;
-
-		var closeBtnImg = closeBtn.AddComponent<Image>();
-		closeBtnImg.color = new Color(0, 0, 0, 0);
-
-		var closeBtnComp = closeBtn.AddComponent<Button>();
-		var closeBtnColors = closeBtnComp.colors;
-		closeBtnColors.normalColor = new Color(0, 0, 0, 0);
-		closeBtnColors.highlightedColor = new Color(0, 0, 0, 0);
-		closeBtnColors.pressedColor = new Color(0, 0, 0, 0);
-		closeBtnColors.selectedColor = new Color(0, 0, 0, 0);
-		closeBtnComp.colors = closeBtnColors;
-		closeBtnComp.targetGraphic = closeBtnImg;
-
-		var closeLabelTmp = SBU.CreateTMPText(closeBtn.transform, "Label", "✕",
-			32, new Color(0.7f, 0.7f, 0.7f, 1f), TextAlignmentOptions.Center, FontStyles.Bold);
-		SBU.Stretch(closeLabelTmp.GetComponent<RectTransform>());
-
-		// 호버 시 빨간색 전환
-		var hoverEffect = closeBtn.AddComponent<UIHoverEffect>();
-		SetPrivateField(hoverEffect, "targetText", closeLabelTmp);
-		SetPrivateField(hoverEffect, "normalColor", new Color(0.7f, 0.7f, 0.7f, 1f));
-		SetPrivateField(hoverEffect, "hoverColor", new Color(1f, 0.2f, 0.2f, 1f));
-		SetPrivateField(hoverEffect, "fontSizeBoost", 0f);
-		SetPrivateField(hoverEffect, "scaleFactor", 1f);
-		SetPrivateField(hoverEffect, "outlineColor", Color.clear);
-		SetPrivateField(hoverEffect, "shadowColor", Color.clear);
-
-		var popupComp = popup.GetComponent<SimplePopup>();
-		UnityEventTools.AddPersistentListener(closeBtnComp.onClick, popupComp.Close);
-
-		popup.SetActive(false);
-		return popup;
-	}
-
-
-	private static CharacterData[] CreateDefaultCharacters()
-	{
-		return new CharacterData[]
-		{
-			new CharacterData
-			{
-				characterType = CharacterType.Mahjong,
-				displayName = "작사",
-				conceptDescription = "패의 조합으로 강력한 공격을 연출하는 전투 전문가.",
-				attackDescription = "패를 투척해 적을 공격한다. 패를 조합해 연속 공격과 광역기를 발동한다.",
-				isAvailable = false,
-				unavailableMessage = "아직 개발되지 않음",
-				previewFallbackColor = new Color(0.25f, 0.38f, 0.75f, 1f),
-			},
-			new CharacterData
-			{
-				characterType = CharacterType.Holdem,
-				displayName = "프로 포커 플레이어",
-				conceptDescription = "카드 배합으로 다양한 기술을 구사하는 전략가.",
-				attackDescription = "카드를 날려 적을 베거나 묶는다. 패의 조합에 따라 발동되는 기술이 달라진다.",
-				isAvailable = false,
-				unavailableMessage = "아직 개발되지 않음",
-				previewFallbackColor = new Color(0.55f, 0.20f, 0.75f, 1f),
-			},
-			new CharacterData
-			{
-				characterType = CharacterType.Dice,
-				displayName = "도박꾼",
-				conceptDescription = "눈금에 따라 달라지는 결과로 적을 제압하는 한탕주의자.",
-				attackDescription = "굴려 나온 눈금만큼 위력이 변하는 공격을 날린다. 운에 따라 대박이 터진다.",
-				isAvailable = true,
-				unavailableMessage = "아직 개발되지 않음",
-				previewFallbackColor = new Color(0f, 0f, 0f, 0f),
-			},
-		};
-	}
-
-	// ─────────────────────────────────────────────────────────────────
-	//  헬퍼 메서드
-	// ─────────────────────────────────────────────────────────────────
-
-	private static void SetStretch(GameObject target)
-		=> SBU.Stretch(target.GetComponent<RectTransform>());
-
-	private static void CreateDecorationLine(Transform parent, string name,
-		float verticalPosition, Color color)
-	{
-		var lineObject = SBU.CreateUIPanel(parent, name, color);
-		var rectTransform = lineObject.GetComponent<RectTransform>();
-		rectTransform.anchorMin = new Vector2(0f, verticalPosition - 0.002f);
-		rectTransform.anchorMax = new Vector2(1f, verticalPosition + 0.002f);
-		rectTransform.offsetMin = Vector2.zero;
-		rectTransform.offsetMax = Vector2.zero;
-	}
-
-	private static GameObject CreateMenuButton(Transform parent, string name, string label)
-	{
-		var go = SBU.CreateButton(parent, name, label,
-			45, SBU.ButtonNormal, SBU.ButtonHighlight, SBU.ButtonPressed);
-		go.GetComponentInChildren<TMP_Text>().alignment = TextAlignmentOptions.Midline;
 		return go;
 	}
 
-	private static GameObject CreateArrowButton(Transform parent, string name, string arrowSymbol)
+	// ── 헬퍼: 무기 선택 슬라이드 ────────────────────────────────────
+
+	/// <summary>무기 선택 UI가 포함된 슬라이드 GO를 반환</summary>
+	static GameObject BuildWeaponSelectSlide(RectTransform parent, string bgSpritePath = null)
 	{
-		var arrowNormal = new Color(SBU.ButtonNormal.r, SBU.ButtonNormal.g,
-			SBU.ButtonNormal.b, 0.7f);
-		var go = SBU.CreateButton(parent, name, arrowSymbol,
-			56, arrowNormal, SBU.ButtonHighlight, SBU.ButtonPressed);
-		go.GetComponentInChildren<TMP_Text>().alignment = TextAlignmentOptions.Midline;
+		var go = new GameObject("Slide3TopContent");
+		go.transform.SetParent(parent, false);
+		var rt = go.AddComponent<RectTransform>();
+		SBU.Stretch(rt);
+
+		// 배경: 실제 이미지가 있으면 사용, 없으면 색상 폴백
+		Sprite bgSprite = null;
+		if (!string.IsNullOrEmpty(bgSpritePath) && System.IO.File.Exists(bgSpritePath))
+		{
+			SBU.EnsurePixelSprite(bgSpritePath);
+			bgSprite = AssetDatabase.LoadAssetAtPath<Sprite>(bgSpritePath);
+		}
+
+		if (bgSprite != null)
+		{
+			var bgGo = new GameObject("WeaponBackground");
+			bgGo.transform.SetParent(go.transform, false);
+			var bgRt = bgGo.AddComponent<RectTransform>();
+			SBU.Stretch(bgRt);
+			var bgImg = bgGo.AddComponent<Image>();
+			bgImg.sprite = bgSprite;
+			bgImg.color = Color.white;
+			bgImg.preserveAspect = true;
+			bgImg.raycastTarget = false;
+		}
+		else
+		{
+			var bgImgRt = SBU.CreateImage(go.transform, "WeaponBgPlaceholder", WeaponBgColor, false);
+			SBU.Stretch(bgImgRt);
+		}
+
+		// 무기 버튼 컨테이너 — 이미지 전체 영역 기준 배치
+		var row = new GameObject("WeaponButtonsRow");
+		row.transform.SetParent(go.transform, false);
+		var rowRt = row.AddComponent<RectTransform>();
+		SBU.Stretch(rowRt);
+
+		// 3개 무기 버튼 — 이미지 내 비석 중심 좌표 (preserveAspect 꺼서 앵커=이미지 비율)
+		// X 균등 간격 0.168, Y 동일, 중앙 비석 ≈ 0.504
+		const float stoneY = 0.505f;
+		var mahjongBtnGo = BuildWeaponButton(rowRt, "Btn_Mahjong", "마작패",
+			MahjongColor, 0.336f, stoneY, 180, 200);
+		BuildWeaponButton(rowRt, "Btn_Holdem", "플레잉카드",
+			HoldemColor, 0.504f, stoneY, 180, 200);
+		var diceBtnGo = BuildWeaponButton(rowRt, "Btn_Dice", "주사위",
+			DiceColor, 0.672f, stoneY, 180, 200);
+
+		ApplyMahjongButtonIcon(mahjongBtnGo);
+		ApplyDiceButtonIcon(diceBtnGo);
+
 		return go;
 	}
 
-	private static void CenterPopup(GameObject target, float width, float height)
-		=> SBU.CenterPopup(target, width, height);
+	// ── 마작패 아이콘: 1통·1만·1삭·백 2x2 배치 ─────────────────────
+	static void ApplyMahjongButtonIcon(GameObject buttonGo)
+	{
+		if (buttonGo == null) return;
+		var iconTrans = buttonGo.transform.Find("IconPlaceholder");
+		if (iconTrans == null) return;
+		var iconRt = iconTrans as RectTransform;
 
-	private static void SetPrivateField(object target, string fieldName, object value)
-		=> SBU.SetField(target, fieldName, value);
+		// 투명 배경으로 전환 — 타일 4장을 위에 얹음
+		var placeholderImg = iconTrans.GetComponent<Image>();
+		if (placeholderImg != null) placeholderImg.color = new Color(1f, 1f, 1f, 0f);
 
-	private static void AddSceneToBuildSettings(string path)
-		=> SBU.AddSceneToBuildSettings(path);
+		const string tileDbPath = "Assets/Mahjong/MahjongTileSprites.asset";
+		var tileDb = AssetDatabase.LoadAssetAtPath<MahjongTileSpriteDatabase>(tileDbPath);
+		Sprite manSprite = tileDb != null ? tileDb.GetMan(1) : null;
+		Sprite pinSprite = tileDb != null ? tileDb.GetPin(1) : null;
+		Sprite souSprite = tileDb != null ? tileDb.GetSou(1) : null;
+
+		const string haku = "Assets/Mahjong/w.png";
+		Sprite hakuSprite = null;
+		if (File.Exists(haku))
+		{
+			SBU.EnsurePixelSprite(haku);
+			hakuSprite = AssetDatabase.LoadAssetAtPath<Sprite>(haku);
+		}
+
+		// 2x2 그리드: 좌상 1통, 우상 1만, 좌하 1삭, 우하 백
+		PlaceMahjongTile(iconRt, "Tile_Pin1",  pinSprite,  new Vector2(0f, 0.5f), new Vector2(0.5f, 1f));
+		PlaceMahjongTile(iconRt, "Tile_Man1",  manSprite,  new Vector2(0.5f, 0.5f), new Vector2(1f, 1f));
+		PlaceMahjongTile(iconRt, "Tile_Sou1",  souSprite,  new Vector2(0f, 0f), new Vector2(0.5f, 0.5f));
+		PlaceMahjongTile(iconRt, "Tile_Haku",  hakuSprite, new Vector2(0.5f, 0f), new Vector2(1f, 0.5f));
+	}
+
+	static void PlaceMahjongTile(RectTransform parent, string name, Sprite sprite,
+		Vector2 anchorMin, Vector2 anchorMax)
+	{
+		if (sprite == null)
+		{
+			Debug.LogWarning($"[CharacterSelectSceneBuilder] {name} 스프라이트 로드 실패 — 폴백 색상 사용");
+		}
+		var tileGo = new GameObject(name);
+		tileGo.transform.SetParent(parent, false);
+		var rt = tileGo.AddComponent<RectTransform>();
+		rt.anchorMin = anchorMin;
+		rt.anchorMax = anchorMax;
+		// 타일 간 약간의 패딩
+		rt.offsetMin = new Vector2(3, 3);
+		rt.offsetMax = new Vector2(-3, -3);
+		var img = tileGo.AddComponent<Image>();
+		img.sprite = sprite;
+		img.color = sprite != null ? Color.white : new Color(0.85f, 0.80f, 0.65f, 1f);
+		img.preserveAspect = true;
+		img.raycastTarget = false;
+	}
+
+	// ── 주사위 아이콘: DiceRollSprites 단일 프레임 ────────────────
+	static void ApplyDiceButtonIcon(GameObject buttonGo)
+	{
+		if (buttonGo == null) return;
+		var iconTrans = buttonGo.transform.Find("IconPlaceholder");
+		if (iconTrans == null) return;
+		var img = iconTrans.GetComponent<Image>();
+		if (img == null) return;
+
+		const string dicePath = "Assets/Player/DiceRollSprites/0.png";
+		if (!File.Exists(dicePath))
+		{
+			Debug.LogWarning($"[CharacterSelectSceneBuilder] 주사위 스프라이트 없음: {dicePath}");
+			return;
+		}
+		SBU.EnsurePixelSprite(dicePath);
+		var sprite = AssetDatabase.LoadAssetAtPath<Sprite>(dicePath);
+		if (sprite == null) return;
+
+		img.sprite = sprite;
+		img.color = Color.white;
+		img.preserveAspect = true;
+	}
+
+	/// <summary>
+	/// 무기 버튼 1개 — 중앙 앵커 방식.
+	/// anchorX/anchorY = 컨테이너 내 비석 중심 비율, w/h = sizeDelta (px @1920x864)
+	/// </summary>
+	static GameObject BuildWeaponButton(RectTransform parent, string name, string label,
+		Color iconColor, float anchorX, float anchorY, float w, float h)
+	{
+		var go = new GameObject(name);
+		go.transform.SetParent(parent, false);
+		var rt = go.AddComponent<RectTransform>();
+		rt.anchorMin = new Vector2(anchorX, anchorY);
+		rt.anchorMax = new Vector2(anchorX, anchorY);
+		rt.pivot = new Vector2(0.5f, 0.5f);
+		rt.sizeDelta = new Vector2(w, h);
+		rt.anchoredPosition = Vector2.zero;
+
+		// 버튼 배경 — 투명 (비석 이미지가 보이도록), 호버 시 반투명 하이라이트
+		var bgImg = go.AddComponent<Image>();
+		bgImg.color = new Color(1f, 1f, 1f, 0f);
+
+		var btn = go.AddComponent<Button>();
+		btn.targetGraphic = bgImg;
+		var cb = btn.colors;
+		cb.normalColor      = new Color(1f, 1f, 1f, 0f);
+		cb.highlightedColor = new Color(1f, 1f, 1f, 0.20f);
+		cb.pressedColor     = new Color(1f, 1f, 1f, 0.35f);
+		cb.selectedColor    = new Color(1f, 1f, 1f, 0.20f);
+		btn.colors = cb;
+
+		// 아이콘 플레이스홀더 — 비석 내부에 맞춤 (패딩 15%)
+		var iconRt = SBU.CreateImage(go.transform, "IconPlaceholder", iconColor, false);
+		iconRt.anchorMin = new Vector2(0.12f, 0.15f);
+		iconRt.anchorMax = new Vector2(0.88f, 0.85f);
+		iconRt.offsetMin = Vector2.zero;
+		iconRt.offsetMax = Vector2.zero;
+
+		// 라벨 — 비석 바로 아래, 부모 컨테이너에 중앙 앵커로 배치
+		var labelTmp = SBU.CreateTMPText(parent, $"{name}_Label", label,
+			36, LabelColor, TextAlignmentOptions.Center, FontStyles.Bold);
+		var labelRt = labelTmp.GetComponent<RectTransform>();
+		labelRt.anchorMin = new Vector2(anchorX, anchorY);
+		labelRt.anchorMax = new Vector2(anchorX, anchorY);
+		labelRt.pivot = new Vector2(0.5f, 1f);
+		labelRt.sizeDelta = new Vector2(w * 1.2f, 50);
+		labelRt.anchoredPosition = new Vector2(0, -(h * 0.5f + 8));
+
+		return go;
+	}
 }

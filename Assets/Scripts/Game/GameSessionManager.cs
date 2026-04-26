@@ -13,6 +13,11 @@ public static class GameSessionManager
 
 	public static int CurrentEventIndex;
 
+	// ── 스테이지 ──
+	// 런타임에 이 값을 바꿔 활성 스테이지를 전환. StartNewGame에서 기본값으로 초기화.
+	public static string CurrentStageId = Stage1Forest.Id;
+	public static StageData CurrentStage => StageRegistry.Get(CurrentStageId) ?? StageRegistry.DefaultStage;
+
 	// ── 전투 컨텍스트 (전투 씬 진입 전 설정) ──
 	public static List<EnemyInfo> BattleEnemies = new List<EnemyInfo>();
 	public static bool IsBossBattle;
@@ -34,7 +39,8 @@ public static class GameSessionManager
 		BattleEnemies.Clear();
 		LastBattleResult = BattleResult.None;
 		IsBossBattle = false;
-		Debug.Log($"[Session] StartNewGame character={character} hearts={PlayerHearts.TotalHalfHearts}");
+		CurrentStageId = Stage1Forest.Id;
+		Debug.Log($"[Session] StartNewGame character={character} hearts={PlayerHearts.TotalHalfHearts} stage={CurrentStageId}");
 	}
 
 	public static bool HasPowerUp(PowerUpType type)

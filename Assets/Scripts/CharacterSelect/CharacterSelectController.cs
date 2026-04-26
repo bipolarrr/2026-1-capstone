@@ -1,214 +1,187 @@
+using System.Collections;
 using UnityEngine;
-using UnityEngine.UI;
 using UnityEngine.SceneManagement;
+using UnityEngine.InputSystem;
 using TMPro;
 
 /// <summary>
-/// 캐릭터 선택 씬의 전체 흐름을 관리한다.
-/// 좌우 선택 내비게이션, 미리보기 갱신, 시작/뒤로 버튼 처리를 담당한다.
+/// 컷씬 슬라이드 진행 + 무기 선택을 관리한다.
+/// 화면 클릭으로 다음 슬라이드, Skip 버튼 또는 Space 길게 누르기로 무기 선택으로 직행.
 /// </summary>
 public class CharacterSelectController : MonoBehaviour
 {
-	[Header("캐릭터 데이터 (Inspector에서 3개 입력)")]
-	[SerializeField] private CharacterData[] characters;
+	[Header("슬라이드 데이터")]
+	[SerializeField] private CutsceneSlide[] slides;
 
-	[Header("미리보기 — 애니메이션 (애니메이터 할당 시 우선 사용)")]
-	[SerializeField] private Animator worldPreviewAnimator;
-	[SerializeField] private SpriteRenderer worldPreviewSpriteRenderer;
+	[Header("UI 참조")]
+	[SerializeField] private TMP_Text subtitleText;
+	[SerializeField] private GameObject clickCatcher;
+	[SerializeField] private GameObject skipButton;
+	[SerializeField] private CanvasGroup fadeGroup;
 
-	[Header("미리보기 — 정지 이미지 / 플레이스홀더")]
-	[SerializeField] private Image previewFallbackImage;
+	private int currentSlideIndex;
+	private bool isTransitioning;
 
-	[Header("정보 텍스트")]
-	[SerializeField] private TMP_Text characterNameText;
-	[SerializeField] private TMP_Text conceptDescriptionText;
-	[SerializeField] private TMP_Text attackDescriptionText;
-
-	[Header("미구현 캐릭터 팝업")]
-	[SerializeField] private SimplePopup unavailablePopup;
-	[SerializeField] private TMP_Text unavailableMessageText;
-
-	[Header("전투 규칙 패널")]
-	[SerializeField] private TMP_Text rulesTitle;
-	[SerializeField] private TMP_Text rulesBody;
-	[SerializeField] private GameObject rulesDetailButton;
-
-	private int currentIndex;
+	private float spaceHeldTime;
+	private const float SpaceSkipThreshold = 0.5f;
+	private const float FadeDuration = 0.15f;
 
 	private const string MainMenuSceneName = "MainMenu";
 	private const string GameSceneName = "GameExploreScene";
 
 	void Start()
 	{
-		currentIndex = 0;
-		UpdateDisplay();
+		currentSlideIndex = 0;
+		ShowSlide(0);
+	}
+
+	void Update()
+	{
+		var kb = Keyboard.current;
+		if (kb == null) return;
+
+		if (kb.spaceKey.isPressed)
+		{
+			spaceHeldTime += Time.deltaTime;
+			if (spaceHeldTime >= SpaceSkipThreshold)
+			{
+				spaceHeldTime = 0f;
+				SkipToWeaponSelect();
+			}
+		}
+
+		if (kb.spaceKey.wasReleasedThisFrame)
+			spaceHeldTime = 0f;
 	}
 
 	// ─── 버튼 이벤트 진입점 ───────────────────────────────────────
 
-	/// <summary>좌측 화살표 버튼에 연결</summary>
-	public void SelectPrevious()
+	/// <summary>전체 화면 클릭 캐쳐에 연결 — 다음 슬라이드로 진행</summary>
+	public void AdvanceSlide()
 	{
-		if (characters == null || characters.Length == 0)
-			return;
+		if (isTransitioning) return;
+		if (slides == null || slides.Length == 0) return;
 
-		currentIndex = (currentIndex - 1 + characters.Length) % characters.Length;
-		Debug.Log($"[CharSelect] SelectPrevious → idx={currentIndex} name=\"{characters[currentIndex].displayName}\"");
-		UpdateDisplay();
+		// 현재 슬라이드가 무기 선택이면 클릭 진행 불가
+		if (slides[currentSlideIndex].isWeaponSelect) return;
+
+		int nextIndex = currentSlideIndex + 1;
+		if (nextIndex >= slides.Length) return;
+
+		AudioManager.Play("UI_Click");
+		StartCoroutine(TransitionToSlide(nextIndex));
 	}
 
-	/// <summary>우측 화살표 버튼에 연결</summary>
-	public void SelectNext()
+	/// <summary>Skip 버튼에 연결 — 마지막 슬라이드(무기 선택)로 즉시 이동</summary>
+	public void SkipToWeaponSelect()
 	{
-		if (characters == null || characters.Length == 0)
-			return;
+		if (isTransitioning) return;
+		if (slides == null || slides.Length == 0) return;
 
-		currentIndex = (currentIndex + 1) % characters.Length;
-		Debug.Log($"[CharSelect] SelectNext → idx={currentIndex} name=\"{characters[currentIndex].displayName}\"");
-		UpdateDisplay();
+		int weaponSlideIndex = slides.Length - 1;
+		if (currentSlideIndex == weaponSlideIndex) return;
+
+		AudioManager.Play("UI_Click");
+		StartCoroutine(TransitionToSlide(weaponSlideIndex));
 	}
 
-	/// <summary>시작 버튼에 연결. 미구현 캐릭터 선택 시 팝업 표시.</summary>
-	public void OnStartClicked()
-	{
-		if (characters == null || characters.Length == 0)
-		{
-			Debug.LogWarning("[CharacterSelectController] 캐릭터 데이터가 비어 있습니다.");
-			return;
-		}
-
-		var selected = characters[currentIndex];
-
-		if (!selected.isAvailable)
-		{
-			Debug.Log($"[CharSelect] OnStartClicked → 미구현 캐릭터 \"{selected.displayName}\" ({selected.characterType}) 팝업 표시");
-			ShowUnavailablePopup(selected.unavailableMessage);
-			return;
-		}
-
-		Debug.Log($"[CharSelect] OnStartClicked → \"{selected.displayName}\" ({selected.characterType}) 선택 확정 → {GameSceneName}");
-		CharacterSelectionContext.SelectedCharacter = selected.characterType;
-		GameSessionManager.StartNewGame(selected.characterType);
-		SceneManager.LoadScene(GameSceneName);
-	}
-
-	/// <summary>뒤로 버튼에 연결. 메인메뉴로 복귀.</summary>
+	/// <summary>뒤로 버튼에 연결 — 메인메뉴로 복귀</summary>
 	public void OnBackClicked()
 	{
-		Debug.Log("[CharSelect] OnBackClicked → MainMenu");
+		Debug.Log("[Cutscene] OnBackClicked → MainMenu");
+		AudioManager.Play("UI_Back_NO");
+		AudioManager.Play("Transition_2_Quit");
 		SceneManager.LoadScene(MainMenuSceneName);
+	}
+
+	// ─── 무기 선택 진입점 (persistent listener용 개별 메서드) ──────
+
+	public void OnWeaponSelected_Mahjong()
+	{
+		SelectWeaponAndStart(CharacterType.Mahjong);
+	}
+
+	public void OnWeaponSelected_Holdem()
+	{
+		SelectWeaponAndStart(CharacterType.Holdem);
+	}
+
+	public void OnWeaponSelected_Dice()
+	{
+		SelectWeaponAndStart(CharacterType.Dice);
 	}
 
 	// ─── 내부 로직 ───────────────────────────────────────────────
 
-	private void ShowUnavailablePopup(string message)
+	private void SelectWeaponAndStart(CharacterType type)
 	{
-		if (unavailableMessageText != null)
-			unavailableMessageText.text = string.IsNullOrEmpty(message) ? "아직 개발되지 않음" : message;
-
-		if (unavailablePopup != null)
-			unavailablePopup.Open();
-		else
-			Debug.LogWarning("[CharacterSelectController] unavailablePopup이 연결되지 않았습니다.");
+		Debug.Log($"[Cutscene] 무기 선택: {type} → {GameSceneName}");
+		AudioManager.Play("UI_OK");
+		AudioManager.Play("Transition_2");
+		CharacterSelectionContext.SelectedCharacter = type;
+		GameSessionManager.StartNewGame(type);
+		SceneManager.LoadScene(GameSceneName);
 	}
 
-	private void UpdateDisplay()
+	private void ShowSlide(int index)
 	{
-		if (characters == null || characters.Length == 0)
-			return;
+		if (slides == null) return;
 
-		var data = characters[currentIndex];
+		currentSlideIndex = index;
 
-		UpdateInfoTexts(data);
-		UpdatePreview(data);
-		UpdateRulesPanel(data);
+		// 모든 슬라이드 topContent 비활성화
+		for (int i = 0; i < slides.Length; i++)
+		{
+			if (slides[i].topContent != null)
+				slides[i].topContent.SetActive(i == index);
+		}
+
+		// 자막 설정
+		if (subtitleText != null)
+			subtitleText.text = slides[index].subtitleText ?? "";
+
+		// 무기 선택 슬라이드에서는 클릭 캐쳐 비활성화
+		bool isWeapon = slides[index].isWeaponSelect;
+		if (clickCatcher != null)
+			clickCatcher.SetActive(!isWeapon);
+
+		// 무기 선택 슬라이드에서는 Skip 버튼 숨기기
+		if (skipButton != null)
+			skipButton.SetActive(!isWeapon);
 	}
 
-	private void UpdateInfoTexts(CharacterData data)
+	private IEnumerator TransitionToSlide(int targetIndex)
 	{
-		if (characterNameText != null)
-			characterNameText.text = data.displayName;
+		isTransitioning = true;
 
-		if (conceptDescriptionText != null)
-			conceptDescriptionText.text = data.conceptDescription;
-
-		if (attackDescriptionText != null)
-			attackDescriptionText.text = data.attackDescription;
-	}
-
-	private void UpdatePreview(CharacterData data)
-	{
-		bool hasAnimatorController = data.previewAnimatorController != null && worldPreviewAnimator != null;
-
-		if (hasAnimatorController)
+		// 페이드 아웃
+		if (fadeGroup != null)
 		{
-			worldPreviewAnimator.runtimeAnimatorController = data.previewAnimatorController;
-
-			if (worldPreviewSpriteRenderer != null)
-				worldPreviewSpriteRenderer.gameObject.SetActive(true);
-
-			if (previewFallbackImage != null)
-				previewFallbackImage.gameObject.SetActive(false);
-
-			return;
+			float elapsed = 0f;
+			while (elapsed < FadeDuration)
+			{
+				elapsed += Time.deltaTime;
+				fadeGroup.alpha = Mathf.Lerp(1f, 0f, elapsed / FadeDuration);
+				yield return null;
+			}
+			fadeGroup.alpha = 0f;
 		}
 
-		// 애니메이터 없음 → 정지 이미지 또는 플레이스홀더 표시
-		if (worldPreviewSpriteRenderer != null)
-			worldPreviewSpriteRenderer.gameObject.SetActive(false);
+		ShowSlide(targetIndex);
 
-		if (previewFallbackImage == null)
-			return;
-
-		previewFallbackImage.gameObject.SetActive(true);
-
-		if (data.previewSprite != null)
+		// 페이드 인
+		if (fadeGroup != null)
 		{
-			previewFallbackImage.sprite = data.previewSprite;
-			previewFallbackImage.color = Color.white;
+			float elapsed = 0f;
+			while (elapsed < FadeDuration)
+			{
+				elapsed += Time.deltaTime;
+				fadeGroup.alpha = Mathf.Lerp(0f, 1f, elapsed / FadeDuration);
+				yield return null;
+			}
+			fadeGroup.alpha = 1f;
 		}
-		else
-		{
-			previewFallbackImage.sprite = null;
-			previewFallbackImage.color = data.previewFallbackColor;
-		}
-	}
 
-	private static readonly string DiceRulesBody = string.Join("\n", new[]
-	{
-		"5개의 주사위를 굴려",
-		"눈의 합으로 데미지를 준다.",
-		"",
-		"<color=#FFD94A>족보를 맞추면</color>",
-		"<color=#FFD94A>고정 데미지 + 광역 50%!</color>",
-		"",
-		"<color=#AAAAAA>· Small Straight</color>  4연속",
-		"<color=#AAAAAA>· Full House</color>  2+3",
-		"<color=#AAAAAA>· Large Straight</color>  5연속",
-		"<color=#AAAAAA>· 4 of a Kind</color>  4개 동일",
-		"<color=#FFD94A>· YACHT</color>  5개 동일!",
-	});
-
-	private void UpdateRulesPanel(CharacterData data)
-	{
-		if (rulesTitle == null)
-			return;
-
-		if (data.isAvailable)
-		{
-			rulesTitle.text = "주사위 전투 규칙";
-			if (rulesBody != null)
-				rulesBody.text = DiceRulesBody;
-			if (rulesDetailButton != null)
-				rulesDetailButton.SetActive(true);
-		}
-		else
-		{
-			rulesTitle.text = "전투 규칙";
-			if (rulesBody != null)
-				rulesBody.text = "\n\n<color=#AAAAAA>개발예정</color>";
-			if (rulesDetailButton != null)
-				rulesDetailButton.SetActive(false);
-		}
+		isTransitioning = false;
 	}
 }

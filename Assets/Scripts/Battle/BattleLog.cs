@@ -2,6 +2,8 @@ using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 using System.Collections;
+using System.Collections.Generic;
+using System;
 
 /// <summary>
 /// 전투 로그 패널. 스크롤 가능한 텍스트 영역에 전투 이벤트를 누적 표시.
@@ -12,6 +14,10 @@ public class BattleLog : MonoBehaviour
 	[SerializeField] ScrollRect scrollRect;
 
 	const int MaxCharacters = 2000;
+	readonly List<string> entries = new List<string>();
+
+	public event Action<string> EntryAdded;
+	public IReadOnlyList<string> Entries => entries;
 
 	void Awake()
 	{
@@ -21,6 +27,12 @@ public class BattleLog : MonoBehaviour
 
 	public void AddEntry(string message)
 	{
+		if (string.IsNullOrEmpty(message))
+			return;
+
+		entries.Add(message);
+		EntryAdded?.Invoke(message);
+
 		if (logText == null)
 			return;
 
@@ -36,8 +48,8 @@ public class BattleLog : MonoBehaviour
 				logText.text = logText.text.Substring(cutIdx + 1);
 		}
 
-		// 다음 프레임에 스크롤을 맨 아래로 (중복 방지)
-		if (scrollRect != null)
+		// 새 메시지가 올 때마다 항상 최하단으로.
+		if (scrollRect != null && isActiveAndEnabled)
 		{
 			if (scrollCoroutine != null)
 				StopCoroutine(scrollCoroutine);
@@ -60,7 +72,13 @@ public class BattleLog : MonoBehaviour
 
 	public void Clear()
 	{
+		entries.Clear();
 		if (logText != null)
 			logText.text = "";
+	}
+
+	public string BuildHistoryText()
+	{
+		return string.Join("\n", entries);
 	}
 }

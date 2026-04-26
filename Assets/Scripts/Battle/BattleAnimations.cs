@@ -159,6 +159,46 @@ public class BattleAnimations : MonoBehaviour
 		slot.localPosition = beforeLocal;
 	}
 
+	// ── 조합 시퀀스 ──
+
+	/// <summary>
+	/// 적 슬롯이 플레이어 앞까지 이동 → 슬램 타격 → 플레이어 빨갛게 점멸 → 원래 자리로 복귀.
+	/// 일반 몹(non-boss) 근접 공격의 표준 시퀀스. DiceBattle·MahjongBattle 양쪽에서 재사용.
+	/// </summary>
+	public IEnumerator EnemyMeleeAttack(RectTransform slot, RectTransform enemyBody,
+		RectTransform playerBodyRt, Image playerBodyImage, PlayerBodyAnimator playerBodyAnimator = null,
+		int damageHalfHearts = 0)
+	{
+		if (slot == null || playerBodyRt == null)
+			yield break;
+
+		Vector3 slotOriginalLocal = slot.localPosition;
+
+		// 플레이어 앞까지 이동 (주사위 2개 정도의 간격 유지) — DiceBattle과 동일 공식.
+		float scale = enemyBody != null ? enemyBody.lossyScale.x : 1f;
+		float bodyWidth = enemyBody != null ? enemyBody.rect.width * scale : 0f;
+		float gap = 42f * scale * 2.4f;
+		Vector3 playerWorld = playerBodyRt.position;
+		Vector3 slotWorld = slot.position;
+		Vector3 frontWorld = new Vector3(playerWorld.x + bodyWidth + gap, slotWorld.y, slotWorld.z);
+
+		yield return StartCoroutine(WalkTo(slot, frontWorld, 0.4f));
+
+		// 슬램 타격
+		Vector3 slamTarget = new Vector3(playerWorld.x, slot.position.y, slot.position.z);
+		yield return StartCoroutine(QuickSlam(slot, slamTarget));
+
+		if (playerBodyImage != null)
+		{
+			playerBodyAnimator?.PlayHitByDamage(damageHalfHearts);
+			FlashHit(playerBodyImage);
+		}
+
+		yield return new WaitForSeconds(0.15f);
+
+		yield return StartCoroutine(WalkBack(slot, slotOriginalLocal, 0.5f));
+	}
+
 	// ── 유틸 ──
 
 	/// <summary>월드 좌표를 slot의 부모 기준 로컬 좌표로 변환.</summary>

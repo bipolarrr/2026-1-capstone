@@ -10,11 +10,11 @@ public class DiceViewportInteraction : MonoBehaviour
 	[SerializeField] private RawImage vaultViewport;
 	[SerializeField] private int      diceLayerIndex = 8; // "Dice3D" 레이어 인덱스
 
-	public event System.Action<YachtDie> OnHoverEnter;
-	public event System.Action<YachtDie> OnHoverExit;
-	public event System.Action<YachtDie> OnClicked;
+	public event System.Action<Dice> OnHoverEnter;
+	public event System.Action<Dice> OnHoverExit;
+	public event System.Action<Dice> OnClicked;
 
-	private YachtDie currentHovered;
+	private Dice currentHovered;
 	private readonly RaycastHit[] hitBuffer = new RaycastHit[10];
 
 	private void Update()
@@ -37,7 +37,7 @@ public class DiceViewportInteraction : MonoBehaviour
 			OnClicked?.Invoke(currentHovered);
 	}
 
-	private YachtDie RaycastDieFromViewport(Camera cam, RawImage vp, Vector2 mousePosition)
+	private Dice RaycastDieFromViewport(Camera cam, RawImage vp, Vector2 mousePosition)
 	{
 		if (cam == null || vp == null) return null;
 
@@ -55,11 +55,11 @@ public class DiceViewportInteraction : MonoBehaviour
 		int mask = 1 << diceLayerIndex;
 
 		int hitCount = Physics.RaycastNonAlloc(ray, hitBuffer, 200f, mask);
-		YachtDie closest         = null;
-		float    closestDistance  = float.MaxValue;
+		Dice  closest         = null;
+		float closestDistance = float.MaxValue;
 		for (int i = 0; i < hitCount; i++)
 		{
-			var die = hitBuffer[i].collider.GetComponentInParent<YachtDie>();
+			var die = hitBuffer[i].collider.GetComponentInParent<Dice>();
 			if (die != null && hitBuffer[i].distance < closestDistance)
 			{
 				closest         = die;

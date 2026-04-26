@@ -97,3 +97,76 @@ InitTestScene*.unity*
 
 # Auto-generated scenes by play mode tests
 /[Aa]ssets/[Ii]nit[Tt]est[Ss]cene*.unity*
+
+# Project-local generated scenes. Battle/explore/menu scenes are rebuilt from Assets/Editor builders.
+/[Aa]ssets/[Ss]cenes/
+
+# Prompt/history scratch files, local IDE settings, and generated working assets.
+/prompts/
+/.vscode/
+/grok_video_to_sprite/
+
+# Local images and visual debugging captures. This repository is code-only.
+*.png
+*.png.meta
+*.jpg
+*.jpg.meta
+*.jpeg
+*.jpeg.meta
+*.webp
+*.webp.meta
+*.gif
+*.gif.meta
+*.bmp
+*.bmp.meta
+*.tif
+*.tif.meta
+*.tiff
+*.tiff.meta
+*.psd
+*.psd.meta
+
+# Local archives and imported asset-pack drops that should not be committed wholesale.
+/*.7z
+/*.zip
+/*.rar
+/[Aa]ssets/*.7z
+/[Aa]ssets/*.zip
+/[Aa]ssets/*.rar
+/[Aa]ssets/8 Bit Music Pack/
+/[Aa]ssets/8 Bit Music Pack.meta
+/[Aa]ssets/8Bit Music Album - 051321/
+/[Aa]ssets/8Bit Music Album - 051321.meta
+/[Aa]ssets/all_sounds/
+/[Aa]ssets/all_sounds.meta
+/[Aa]ssets/CensorEffect/
+/[Aa]ssets/CensorEffect.meta
+/[Aa]ssets/Dices/
+/[Aa]ssets/Dices.meta
+/[Aa]ssets/TextMesh Pro/
+/[Aa]ssets/TextMesh Pro.meta
+
+# Generated/fallback Unity assets and recovery dumps.
+/[Aa]ssets/[Gg]enerated/
+/[Aa]ssets/[Gg]enerated.meta
+/[Aa]ssets/_Recovery/
+/[Aa]ssets/_Recovery.meta
+
+# Python caches and temporary bytecode.
+__pycache__/
+*.py[cod]
+
+# Root-level package/source drops and local Unity solution variants.
+/ComputeCommandBuffer.cs
+/IBaseCommandBuffer.cs
+/IComputeCommandBuffer.cs
+/IRasterCommandBuffer.cs
+/IUnsafeCommandBuffer.cs
+/RasterCommandBuffer.cs
+/UnsafeCommandBuffer.cs
+/Capstone.slnx
+
+# Archive sidecars for ignored local asset bundles.
+*.7z.meta
+*.zip.meta
+*.rar.meta
