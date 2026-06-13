@@ -7,5 +7,14 @@ public enum PowerUpType
 	AllOrNothing,
 
 	/// <summary>일회성 부활: 사망에 이르는 데미지 1회 무효화 후 소멸</summary>
-	ReviveOnce
+	ReviveOnce,
+
+	/// <summary>마작 중간공격 피해 증가</summary>
+	MahjongPartialFocus,
+
+	/// <summary>마작 화료 피해 증가</summary>
+	MahjongYakuFocus,
+
+	/// <summary>마작 적 론/쯔모 피해 완화</summary>
+	MahjongSafetyCharm
 }

@@ -45,5 +45,43 @@ namespace BattleTests
 			Assert.AreEqual(1, EnemyCounterAttackDirector.GetDefenseRollCount(new EnemyDiceResult { hasCombo = false }));
 			Assert.AreEqual(3, EnemyCounterAttackDirector.GetDefenseRollCount(new EnemyDiceResult { hasCombo = true }));
 		}
+
+		[Test]
+		public void EnemyDicePresentationMode_UsesViewportForRankOneToThree()
+		{
+			Assert.AreEqual(EnemyDicePresentationMode.Viewport,
+				EnemyCounterAttackDirector.ResolveDicePresentationMode(1, true));
+			Assert.AreEqual(EnemyDicePresentationMode.Viewport,
+				EnemyCounterAttackDirector.ResolveDicePresentationMode(3, true));
+		}
+
+		[Test]
+		public void EnemyDicePresentationMode_UsesCenterPopupForRankFourAndFive()
+		{
+			Assert.AreEqual(EnemyDicePresentationMode.CenterPopup,
+				EnemyCounterAttackDirector.ResolveDicePresentationMode(4, true));
+			Assert.AreEqual(EnemyDicePresentationMode.CenterPopup,
+				EnemyCounterAttackDirector.ResolveDicePresentationMode(5, true));
+		}
+
+		[Test]
+		public void EnemyDicePresentationMode_DoesNotChangeDefenseEvaluation()
+		{
+			var enemy = new EnemyDiceResult
+			{
+				values = new[] { 2, 3, 4, 5 },
+				comboName = "Small Straight",
+				hasCombo = true,
+				damageMultiplier = EnemyDiceResult.GetMultiplier("Small Straight")
+			};
+
+			var mode = EnemyCounterAttackDirector.ResolveDicePresentationMode(4, true);
+			var defense = DefenseCalculator.Evaluate(new[] { 1, 2, 3, 4, 6 }, enemy);
+
+			Assert.AreEqual(EnemyDicePresentationMode.CenterPopup, mode);
+			Assert.IsTrue(defense.blocked);
+			Assert.AreEqual(0, DefenseCalculator.CalculateEnemyDamage(4, enemy.damageMultiplier)
+				* (defense.blocked ? 0 : 1));
+		}
 	}
 }

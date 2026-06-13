@@ -14,7 +14,6 @@ public class BattleSceneController : BattleControllerBase, IBattleDebugTarget
 	[SerializeField] Button nextRoundButton;
 
 	[SerializeField] PlayerDeathAnimator deathAnimator;
-	[SerializeField] PlayerRollAnimator rollAnimator;
 	[SerializeField] PlayerAttackAnimator attackAnimator;
 	[SerializeField] PlayerBodyAnimator playerBodyAnimator;
 
@@ -32,25 +31,8 @@ public class BattleSceneController : BattleControllerBase, IBattleDebugTarget
 			Debug.LogWarning("[Battle] PlayerHearts가 비어 있음 — 5하트(10반칸)로 초기화");
 			GameSessionManager.PlayerHearts.Reset();
 		}
-		if (GameSessionManager.BattleEnemies.Count == 0)
-		{
-			Debug.LogWarning("[Battle] BattleEnemies가 비어 있음 — 기본 적 생성");
-			GenerateDefaultEnemies();
-		}
-
-		// 원본 보존: 전투 취소 시 GameSessionManager의 적 데이터를 오염시키지 않기 위해 딥카피
-		enemies = new List<EnemyInfo>();
-		foreach (var e in GameSessionManager.BattleEnemies)
-			enemies.Add(e.Clone());
-		targetIndex = 0;
-		for (int i = 0; i < enemies.Count; i++)
-		{
-			if (enemies[i].IsAlive)
-			{
-				targetIndex = i;
-				break;
-			}
-		}
+		EnsureSessionBattleEnemies("Battle");
+		LoadSessionEnemiesSnapshot();
 
 		if (enemies.Count == 0)
 			Debug.LogError("[Battle] Start: BattleEnemies가 비어 있음");
@@ -80,7 +62,9 @@ public class BattleSceneController : BattleControllerBase, IBattleDebugTarget
 				enemies          = enemies,
 				enemyPanels      = enemyPanels,
 				enemyBodies      = enemyBodies,
+				enemyIdleProjectiles = enemyIdleProjectiles,
 				enemyAnimators   = enemyAnimators,
+				enemyNames       = enemyNames,
 				playerBody       = playerBody,
 				playerBodyAnimator = playerBodyAnimator,
 				battleLog        = battleLog,
@@ -92,7 +76,10 @@ public class BattleSceneController : BattleControllerBase, IBattleDebugTarget
 				hud              = hud,
 				updatePlayerHud  = UpdatePlayerHUD,
 				setRoundConfirmed = v => roundConfirmed = v,
-				startPlayerDefeatedRoutine = () => StartCoroutine(PlayerDefeatedRoutine())
+				startPlayerDefeatedRoutine = () => StartCoroutine(PlayerDefeatedRoutine()),
+				findMobDef = TryGetMobDef,
+				findEnemyDiceProfileId = ResolveEnemyDiceProfileId,
+				findEnemyAttackVfxSprite = ResolveEnemyAttackVfxSprite
 			});
 			counterAttackDirector.ResetOnNewTurn();
 		}
@@ -123,17 +110,7 @@ public class BattleSceneController : BattleControllerBase, IBattleDebugTarget
 			hud.ClearDamageText();
 		}
 
-		// 전투 개시 로그
-		if (battleLog != null)
-		{
-			battleLog.Clear();
-			if (GameSessionManager.IsBossBattle)
-				battleLog.AddEntry("<color=#FF5555>— 보스 전투 개시! —</color>");
-			else
-				battleLog.AddEntry("— 전투 개시! —");
-			foreach (var e in enemies)
-				battleLog.AddEntry($"  {e.name} <color=#FFD94A>{e.RankStars}</color> <color=#AAAAAA>(HP {e.maxHp})</color>");
-		}
+		LogBattleIntro();
 	}
 
 	void OnDestroy()
@@ -201,7 +178,8 @@ public class BattleSceneController : BattleControllerBase, IBattleDebugTarget
 					: $"[{string.Join(", ", fs)}] 중 하나를";
 				clauses.Add($"{fc} 찾아 {name}를");
 			}
-			battleLog.AddEntry($"<color=#FFD94A>{string.Join(", ", clauses)} 완성시키자!</color>");
+			battleLog.AddEntry($"<color=#FFD94A>{string.Join(", ", clauses)} 완성시키자!</color>",
+				BattleEventPresentation.LogAndPopup);
 			return;
 		}
 
@@ -213,7 +191,8 @@ public class BattleSceneController : BattleControllerBase, IBattleDebugTarget
 		else
 			faceClause = $"[{string.Join(", ", faces)}] 중 하나를";
 
-		battleLog.AddEntry($"<color=#FFD94A>{faceClause} 찾아 {targetName}를 완성시키자!</color>");
+		battleLog.AddEntry($"<color=#FFD94A>{faceClause} 찾아 {targetName}를 완성시키자!</color>",
+			BattleEventPresentation.LogAndPopup);
 	}
 
 	/// <summary>한국어 목적격 조사(을/를)를 주사위 눈 숫자 종성 여부로 선택.</summary>
@@ -235,7 +214,6 @@ public class BattleSceneController : BattleControllerBase, IBattleDebugTarget
 		if (hud != null) hud.StopComboLabel();
 		cancelButton.gameObject.SetActive(false);
 		confirmButton.gameObject.SetActive(false);
-		if (rollAnimator != null) rollAnimator.Play();
 		UpdateRollsText();
 	}
 
@@ -323,15 +301,9 @@ public class BattleSceneController : BattleControllerBase, IBattleDebugTarget
 		confirmButton.gameObject.SetActive(false);
 		rollButton.interactable = false;
 
-		if (attackAnimator != null)
-		{
-			RectTransform targetBody = targetIndex >= 0 && targetIndex < enemyBodies.Length && enemyBodies[targetIndex] != null
-				? enemyBodies[targetIndex].rectTransform
-				: null;
-			Coroutine attackAnim = attackAnimator.Play(targetBody);
-			if (attackAnim != null)
-				yield return attackAnim;
-		}
+		int attackTargetIndex = targetIndex;
+		if (attackTargetIndex < 0 || attackTargetIndex >= enemies.Count || !enemies[attackTargetIndex].IsAlive)
+			attackTargetIndex = FindFirstAliveEnemyIndex(enemies);
 
 		if (battleLog != null)
 		{
@@ -342,56 +314,30 @@ public class BattleSceneController : BattleControllerBase, IBattleDebugTarget
 				battleLog.AddEntry($"도박사의 공격! {diceStr}");
 		}
 
-		// 대상에게 100%
-		bool targetWasAlive = enemies[targetIndex].IsAlive;
-		enemies[targetIndex].TakeDamage(damage);
-		vfx.SpawnDamageText(targetIndex, damage);
-		PlayEnemyHitAnimation(targetIndex);
-		if (battleAnims != null && targetIndex < enemyBodies.Length && !EnemyHasHitAnimation(targetIndex))
+		bool impactApplied = false;
+		System.Action applyImpact = () =>
 		{
-			battleAnims.FlashHit(enemyBodies[targetIndex]);
+			if (impactApplied)
+				return;
+			impactApplied = true;
+			ApplyPlayerAttackImpact(attackTargetIndex, attack);
+		};
+
+		if (attackAnimator != null)
+		{
+			RectTransform targetBody = enemyBodies != null
+				&& attackTargetIndex >= 0
+				&& attackTargetIndex < enemyBodies.Length
+				&& enemyBodies[attackTargetIndex] != null
+				? enemyBodies[attackTargetIndex].rectTransform
+				: null;
+			Coroutine attackAnim = attackAnimator.Play(targetBody, applyImpact);
+			if (attackAnim != null)
+				yield return attackAnim;
 		}
 
-		if (battleLog != null)
-		{
-			battleLog.AddEntry($"  → {enemies[targetIndex].name}에게 <color=#FFD94A>{damage}</color> 데미지!");
-			if (targetWasAlive && !enemies[targetIndex].IsAlive)
-				battleLog.AddEntry($"  <color=#FF8888>{enemies[targetIndex].name} 처치!</color>");
-		}
-		if (targetWasAlive && !enemies[targetIndex].IsAlive)
-			AudioManager.Play("Enemy_Die");
-
-		if (splash > 0)
-		{
-			for (int i = 0; i < enemies.Count; i++)
-			{
-				if (i != targetIndex && enemies[i].IsAlive)
-				{
-					bool wasAlive = enemies[i].IsAlive;
-					enemies[i].TakeDamage(splash);
-					vfx.SpawnDamageText(i, splash);
-					PlayEnemyHitAnimation(i);
-					if (battleAnims != null && i < enemyBodies.Length && !EnemyHasHitAnimation(i))
-					{
-						battleAnims.FlashHit(enemyBodies[i]);
-					}
-
-					if (battleLog != null)
-					{
-						battleLog.AddEntry($"  → {enemies[i].name}에게 <color=#AAAAAA>{splash}</color> 스플래시!");
-						if (wasAlive && !enemies[i].IsAlive)
-							battleLog.AddEntry($"  <color=#FF8888>{enemies[i].name} 처치!</color>");
-					}
-					if (wasAlive && !enemies[i].IsAlive)
-						AudioManager.Play("Enemy_Die");
-				}
-			}
-		}
-
-		RefreshAllEnemyHp();
-
-		if (attack.shakeIntensity > 0f)
-			vfx.Shake(attack.shakeIntensity);
+		if (!impactApplied)
+			applyImpact();
 
 		bool allDead = true;
 		foreach (var e in enemies)
@@ -399,17 +345,11 @@ public class BattleSceneController : BattleControllerBase, IBattleDebugTarget
 			if (e.IsAlive) { allDead = false; break; }
 		}
 
-		if (hud != null)
-		{
-			hud.SetDamageResultText(!string.IsNullOrEmpty(comboName)
-				? $"{comboName}! {damage} 데미지"
-				: $"{damage} 데미지");
-		}
-
 		if (allDead)
 		{
 			if (battleLog != null)
-				battleLog.AddEntry("<color=#55FF55>모든 적을 처치했다!</color>");
+				battleLog.AddEntry("<color=#55FF55>모든 적을 처치했다!</color>",
+					BattleEventPresentation.LogAndAnimation);
 			Debug.Log("[Battle] AllEnemiesDead → BattleWon");
 			StartCoroutine(BattleWonRoutine());
 		}
@@ -426,6 +366,64 @@ public class BattleSceneController : BattleControllerBase, IBattleDebugTarget
 
 			if (counterAttackDirector != null)
 				counterAttackDirector.StartCounterAttack();
+		}
+	}
+
+	void ApplyPlayerAttackImpact(int attackTargetIndex, PlayerAttackPipeline.AttackResolution attack)
+	{
+		if (attackTargetIndex < 0 || attackTargetIndex >= enemies.Count || !enemies[attackTargetIndex].IsAlive)
+			return;
+
+		int damage = attack.damage;
+		int splash = attack.splashDamage;
+
+		bool targetWasAlive = enemies[attackTargetIndex].IsAlive;
+		enemies[attackTargetIndex].TakeDamage(damage);
+		vfx?.SpawnDamageText(attackTargetIndex, damage);
+		PlayEnemyDamagedFeedback(attackTargetIndex);
+
+		if (battleLog != null)
+		{
+			battleLog.AddEntry($"  → {enemies[attackTargetIndex].name}에게 <color=#FFD94A>{damage}</color> 데미지!");
+			if (targetWasAlive && !enemies[attackTargetIndex].IsAlive)
+				battleLog.AddEntry($"  <color=#FF8888>{enemies[attackTargetIndex].name} 처치!</color>");
+		}
+		if (targetWasAlive && !enemies[attackTargetIndex].IsAlive)
+			AudioManager.Play("Enemy_Die");
+
+		if (splash > 0)
+		{
+			for (int i = 0; i < enemies.Count; i++)
+			{
+				if (i != attackTargetIndex && enemies[i].IsAlive)
+				{
+					bool wasAlive = enemies[i].IsAlive;
+					enemies[i].TakeDamage(splash);
+					vfx?.SpawnDamageText(i, splash);
+					PlayEnemyDamagedFeedback(i);
+
+					if (battleLog != null)
+					{
+						battleLog.AddEntry($"  → {enemies[i].name}에게 <color=#AAAAAA>{splash}</color> 스플래시!");
+						if (wasAlive && !enemies[i].IsAlive)
+							battleLog.AddEntry($"  <color=#FF8888>{enemies[i].name} 처치!</color>");
+					}
+					if (wasAlive && !enemies[i].IsAlive)
+						AudioManager.Play("Enemy_Die");
+				}
+			}
+		}
+
+		RefreshAllEnemyHp();
+
+		if (attack.shakeIntensity > 0f && vfx != null)
+			vfx.Shake(attack.shakeIntensity);
+
+		if (hud != null)
+		{
+			hud.SetDamageResultText(!string.IsNullOrEmpty(attack.comboName)
+				? $"{attack.comboName}! {damage} 데미지"
+				: $"{damage} 데미지");
 		}
 	}
 
@@ -454,11 +452,12 @@ public class BattleSceneController : BattleControllerBase, IBattleDebugTarget
 		if (diceDirector != null && diceDirector.HasRolledOnce)
 			return;
 		if (battleLog != null)
-			battleLog.AddEntry("<color=#AAAAAA>도박사가 전투를 회피했다.</color>");
+			battleLog.AddEntry("<color=#AAAAAA>도박사가 전투를 회피했다.</color>",
+				BattleEventPresentation.LogAndAnimation);
 		Debug.Log("[Battle] CancelBattle → GameExploreScene");
 		AudioManager.Play("UI_Back_NO");
 		AudioManager.Play("Transition_2");
-		GameSessionManager.LastBattleResult = BattleResult.Cancelled;
+		GameSessionManager.CancelBattle();
 		SceneManager.LoadScene("GameExploreScene");
 	}
 
@@ -473,8 +472,7 @@ public class BattleSceneController : BattleControllerBase, IBattleDebugTarget
 		AudioManager.Play("Player_Death");
 		if (deathAnimator != null)
 		{
-			// 기존 플레이어 캐릭터는 Y축 180도 회전(좌우반전) → 오른쪽을 바라봄
-			yield return deathAnimator.PlayDeathSequence(facingRight: true);
+			yield return deathAnimator.PlayDeathSequence();
 		}
 		else
 		{
@@ -485,9 +483,12 @@ public class BattleSceneController : BattleControllerBase, IBattleDebugTarget
 
 	IEnumerator BattleWonRoutine()
 	{
-		yield return new WaitForSeconds(1.2f);
-		GameSessionManager.LastBattleResult = BattleResult.Won;
-		GameSessionManager.BattleEnemies.Clear();
+		float waitStartedAt = Time.time;
+		yield return WaitForEnemyDeathAnimations(5.2f);
+		float remaining = 1.2f - (Time.time - waitStartedAt);
+		if (remaining > 0f)
+			yield return new WaitForSeconds(remaining);
+		GameSessionManager.CompleteBattleWon();
 		AudioManager.Play("Transition_2");
 		SceneManager.LoadScene("GameExploreScene");
 	}
@@ -642,5 +643,10 @@ public class BattleSceneController : BattleControllerBase, IBattleDebugTarget
 		}
 
 		return sb.ToString().TrimEnd();
+	}
+
+	public string DebugPlaySprite(string target, int objectIndex, string spriteKind, float loopSeconds)
+	{
+		return DebugPlayBattleSprite(target, objectIndex, spriteKind, playerBodyAnimator, loopSeconds);
 	}
 }

@@ -61,7 +61,7 @@ namespace MahjongTests
 		}
 
 		[Test]
-		public void Toitoi_AllTriplets()
+		public void Suuankou_AllClosedTriplets_IsYakuman()
 		{
 			var hand = new List<Tile>
 			{
@@ -72,7 +72,9 @@ namespace MahjongTests
 				T(Suit.Dragon,2),T(Suit.Dragon,2)
 			};
 			var r = Pick(hand, T(Suit.Dragon,2), true, false);
-			Assert.IsTrue(r.Yaku.Hits.Any(h => h.Id == YakuId.Toitoi));
+			Assert.IsTrue(r.Yaku.Hits.Any(h => h.Id == YakuId.Suuankou));
+			Assert.That(r.Yaku.YakumanMultiplier, Is.GreaterThanOrEqualTo(1));
+			Assert.IsFalse(r.Yaku.Hits.Any(h => h.Id == YakuId.Toitoi));
 		}
 
 		[Test]

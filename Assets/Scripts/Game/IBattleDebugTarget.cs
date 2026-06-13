@@ -8,4 +8,5 @@ public interface IBattleDebugTarget
 	string DebugKillPlayer();
 	string DebugKillAllEnemies();
 	string DebugKillEnemies(int[] indices);
+	string DebugPlaySprite(string target, int objectIndex, string spriteKind, float loopSeconds);
 }

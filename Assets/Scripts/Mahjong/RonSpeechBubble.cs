@@ -21,12 +21,17 @@ namespace Mahjong
 		{
 			parentCanvas = GetComponentInParent<Canvas>();
 			if (root == null) root = transform as RectTransform;
+			ConfigureLabel();
 		}
 
 		public IEnumerator ShowRoutine(RectTransform anchor, string text, float duration = 0.9f)
 		{
 			if (root == null) yield break;
-			if (label != null) label.text = text;
+			if (label != null)
+			{
+				ConfigureLabel();
+				label.text = text;
+			}
 			gameObject.SetActive(true);
 			PositionAbove(anchor);
 			yield return new WaitForSeconds(duration);
@@ -47,6 +52,15 @@ namespace Mahjong
 			root.anchorMin = root.anchorMax = new Vector2(0.5f, 0.5f);
 			root.pivot = new Vector2(0.5f, 0f);
 			root.anchoredPosition = local + offset;
+		}
+
+		void ConfigureLabel()
+		{
+			if (label == null) return;
+			label.enableAutoSizing = true;
+			label.fontSizeMin = 24f;
+			label.fontSizeMax = 42f;
+			label.textWrappingMode = TextWrappingModes.NoWrap;
 		}
 	}
 }

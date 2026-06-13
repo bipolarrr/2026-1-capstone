@@ -26,6 +26,20 @@ namespace Mahjong
 		Coroutine running;
 		float baseY;
 		bool baseCaptured;
+		bool pointerInside;
+		bool persistentBorder;
+		string readabilityHint = "";
+		Color persistentBorderColor = new Color(0.55f, 0.90f, 1f, 0.95f);
+
+		Vector2 defaultNameSize;
+		bool defaultNameAutoSizing;
+		float defaultNameFontSizeMin;
+		float defaultNameFontSizeMax;
+		TextWrappingModes defaultNameWrapping;
+		TextAlignmentOptions defaultNameAlignment;
+		bool nameDefaultsCaptured;
+
+		static readonly Color DefaultHoverBorderColor = new Color(1f, 0.92f, 0.4f, 0.95f);
 
 		void OnEnable()
 		{
@@ -35,6 +49,7 @@ namespace Mahjong
 		void OnDisable()
 		{
 			if (running != null) { StopCoroutine(running); running = null; }
+			pointerInside = false;
 			if (content != null && baseCaptured)
 			{
 				var p = content.anchoredPosition;
@@ -58,10 +73,12 @@ namespace Mahjong
 			if (!isActiveAndEnabled || content == null) return;
 			if (!baseCaptured) CaptureBase();
 
-			if (highlightBorder != null) highlightBorder.gameObject.SetActive(true);
+			pointerInside = true;
+			ApplyBorderState();
 			if (nameLabel != null && tileVisual != null)
 			{
-				nameLabel.text = MahjongTileVisual.LabelFor(tileVisual.Data);
+				ApplyNameLabelLayout(!string.IsNullOrEmpty(readabilityHint));
+				nameLabel.text = BuildHoverText();
 				nameLabel.gameObject.SetActive(true);
 			}
 			// 호버 동안만 원래 위치에도 raycast 캐처가 깔리도록 활성화 — lift로 인해 생긴
@@ -75,10 +92,92 @@ namespace Mahjong
 		public void OnPointerExit(PointerEventData eventData)
 		{
 			if (content == null) return;
-			if (highlightBorder != null) highlightBorder.gameObject.SetActive(false);
+			pointerInside = false;
+			ApplyBorderState();
 			if (nameLabel != null) nameLabel.gameObject.SetActive(false);
 			if (hitboxExtender != null) hitboxExtender.SetActive(false);
 			StartTween(baseY);
+		}
+
+		public void SetReadabilityHint(string hintText, Color borderColor, bool showPersistentBorder)
+		{
+			readabilityHint = hintText ?? "";
+			persistentBorderColor = borderColor;
+			persistentBorder = showPersistentBorder;
+			ApplyBorderState();
+		}
+
+		public void ClearReadabilityHint()
+		{
+			readabilityHint = "";
+			persistentBorder = false;
+			ApplyBorderState();
+			ApplyNameLabelLayout(false);
+		}
+
+		string BuildHoverText()
+		{
+			string tileName = tileVisual != null ? MahjongTileVisual.LabelFor(tileVisual.Data) : "";
+			if (string.IsNullOrEmpty(readabilityHint))
+				return tileName;
+			return $"{tileName}\n{readabilityHint}";
+		}
+
+		void ApplyBorderState()
+		{
+			if (highlightBorder == null) return;
+			bool visible = pointerInside || persistentBorder;
+			highlightBorder.gameObject.SetActive(visible);
+			if (visible)
+				ApplyBorderColor(persistentBorder ? persistentBorderColor : DefaultHoverBorderColor);
+		}
+
+		void ApplyBorderColor(Color color)
+		{
+			if (highlightBorder == null) return;
+			var images = highlightBorder.GetComponentsInChildren<Image>(true);
+			foreach (var image in images)
+			{
+				if (image == null || image == highlightBorder)
+					continue;
+				image.color = color;
+			}
+		}
+
+		void ApplyNameLabelLayout(bool hasHint)
+		{
+			if (nameLabel == null) return;
+			CaptureNameDefaults();
+			var rt = nameLabel.rectTransform;
+			if (hasHint)
+			{
+				rt.sizeDelta = new Vector2(defaultNameSize.x, 64f);
+				nameLabel.enableAutoSizing = true;
+				nameLabel.fontSizeMin = 10f;
+				nameLabel.fontSizeMax = 18f;
+				nameLabel.textWrappingMode = TextWrappingModes.Normal;
+				nameLabel.alignment = TextAlignmentOptions.Bottom;
+				return;
+			}
+
+			rt.sizeDelta = defaultNameSize;
+			nameLabel.enableAutoSizing = defaultNameAutoSizing;
+			nameLabel.fontSizeMin = defaultNameFontSizeMin;
+			nameLabel.fontSizeMax = defaultNameFontSizeMax;
+			nameLabel.textWrappingMode = defaultNameWrapping;
+			nameLabel.alignment = defaultNameAlignment;
+		}
+
+		void CaptureNameDefaults()
+		{
+			if (nameDefaultsCaptured || nameLabel == null) return;
+			defaultNameSize = nameLabel.rectTransform.sizeDelta;
+			defaultNameAutoSizing = nameLabel.enableAutoSizing;
+			defaultNameFontSizeMin = nameLabel.fontSizeMin;
+			defaultNameFontSizeMax = nameLabel.fontSizeMax;
+			defaultNameWrapping = nameLabel.textWrappingMode;
+			defaultNameAlignment = nameLabel.alignment;
+			nameDefaultsCaptured = true;
 		}
 
 		float LiftAmount()

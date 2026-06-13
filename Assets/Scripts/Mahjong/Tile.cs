@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace Mahjong
 {
@@ -58,9 +59,7 @@ namespace Mahjong
 
 		public int CompareTo(Tile other)
 		{
-			int s = Suit.CompareTo(other.Suit);
-			if (s != 0) return s;
-			return Value.CompareTo(other.Value);
+			return TileOrdering.Compare(this, other);
 		}
 
 		public static bool operator ==(Tile a, Tile b) => a.Equals(b);
@@ -78,6 +77,49 @@ namespace Mahjong
 				_ => "?"
 			};
 			return $"{Value}{suit}{(IsRedFive ? "r" : "")}";
+		}
+	}
+
+	public static class TileOrdering
+	{
+		const int SuitStride = 100;
+		const int ValueStride = 2;
+
+		public static void Sort(List<Tile> tiles)
+		{
+			if (tiles == null)
+				return;
+			tiles.Sort(Compare);
+		}
+
+		public static int Compare(Tile left, Tile right)
+		{
+			return SortKey(left).CompareTo(SortKey(right));
+		}
+
+		public static int SortKey(Tile tile)
+		{
+			return SuitOrder(tile.Suit) * SuitStride
+				+ tile.Value * ValueStride
+				+ RedFiveOrder(tile);
+		}
+
+		static int SuitOrder(Suit suit)
+		{
+			switch (suit)
+			{
+				case Suit.Man: return 0;
+				case Suit.Pin: return 1;
+				case Suit.Sou: return 2;
+				case Suit.Wind: return 3;
+				case Suit.Dragon: return 4;
+				default: return 99;
+			}
+		}
+
+		static int RedFiveOrder(Tile tile)
+		{
+			return tile.IsNumber && tile.Value == 5 && tile.IsRedFive ? 1 : 0;
 		}
 	}
 }

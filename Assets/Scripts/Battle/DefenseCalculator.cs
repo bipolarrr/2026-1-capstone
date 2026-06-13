@@ -20,8 +20,7 @@ public static class DefenseCalculator
 	/// <summary>
 	/// 플레이어 주사위로 적 주사위 결과를 방어할 수 있는지 판정.
 	/// - 족보 있음: 같은 족보를 만들면 100% 방어
-	/// - 족보 없음: 플레이어 주사위 5개 중 적 눈과 일치하는 수에 비례하여 방어
-	///   (5개 일치 100%, 4개 80%, 3개 60%, 2개 40%, 1개 20%, 0개 0%)
+	/// - 족보 없음: 적 주사위 구성이 플레이어 주사위의 부분집합이면 100% 방어, 아니면 실패
 	/// </summary>
 	public static DefenseResult Evaluate(int[] playerDice, EnemyDiceResult enemyResult)
 	{
@@ -45,22 +44,17 @@ public static class DefenseCalculator
 		else
 		{
 			int matchCount = CountMatches(playerDice, enemyResult.values);
-			int total = enemyResult.values.Length;
-			float rate = total > 0 ? (float)matchCount / total : 0f;
-			bool perfect = matchCount >= total;
+			int total = enemyResult.values != null ? enemyResult.values.Length : 0;
+			bool blocked = total > 0 && matchCount >= total;
 
-			string desc;
-			if (perfect)
-				desc = $"완벽 방어! ({matchCount}/{total} 일치)";
-			else if (matchCount > 0)
-				desc = $"부분 방어 ({matchCount}/{total} 일치, {Mathf.RoundToInt(rate * 100)}% 감소)";
-			else
-				desc = "방어 실패...";
+			string desc = blocked
+				? $"완벽 방어! ({matchCount}/{total} 일치)"
+				: $"방어 실패... ({matchCount}/{total} 일치)";
 
 			return new DefenseResult
 			{
-				blocked = perfect,
-				reductionRate = rate,
+				blocked = blocked,
+				reductionRate = blocked ? 1f : 0f,
 				description = desc
 			};
 		}
@@ -73,6 +67,9 @@ public static class DefenseCalculator
 	/// </summary>
 	static bool PlayerHasCombo(int[] dice, string comboName)
 	{
+		if (dice == null)
+			return false;
+
 		int[] counts = new int[7];
 		foreach (int v in dice)
 			if (v >= 1 && v <= 6)
@@ -109,6 +106,9 @@ public static class DefenseCalculator
 	/// </summary>
 	public static int CountMatches(int[] playerDice, int[] enemyValues)
 	{
+		if (playerDice == null || enemyValues == null)
+			return 0;
+
 		int[] playerCounts = new int[7];
 		foreach (int v in playerDice)
 		{

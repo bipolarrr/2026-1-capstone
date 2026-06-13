@@ -17,10 +17,8 @@ public class PlayerDeathAnimator : MonoBehaviour
 
 	/// <summary>
 	/// 사망 애니메이션을 재생한다.
-	/// facingRight가 true이면 Y축 180도 회전(좌우반전)으로 오른쪽을 바라보고,
-	/// false이면 원본 방향(왼쪽)을 유지한다.
 	/// </summary>
-	public IEnumerator PlayDeathSequence(bool facingRight)
+	public IEnumerator PlayDeathSequence()
 	{
 		if (deathSprites == null || deathSprites.Length == 0 || playerBody == null)
 		{
@@ -32,16 +30,11 @@ public class PlayerDeathAnimator : MonoBehaviour
 		if (bodyAnimator != null)
 			bodyAnimator.PauseAuto();
 
-		// 캐릭터 방향에 맞게 Y축 쿼터니언 회전으로 좌우반전
-		// 스프라이트 원본이 왼쪽을 향하므로 오른쪽 전환 시 Y축 180도 회전
-		float yAngle = facingRight ? 180f : 0f;
-		playerBody.rectTransform.localRotation = Quaternion.Euler(0f, yAngle, 0f);
-
 		float frameDuration = 1f / Mathf.Max(1f, frameRate);
 		for (int i = 0; i < deathSprites.Length; i++)
 		{
 			if (deathSprites[i] != null)
-				playerBody.sprite = deathSprites[i];
+				SetPlayerSprite(deathSprites[i]);
 			yield return new WaitForSeconds(frameDuration);
 		}
 
@@ -63,5 +56,13 @@ public class PlayerDeathAnimator : MonoBehaviour
 
 		yield return new WaitForSeconds(0.5f);
 		SceneManager.LoadScene("MainMenu");
+	}
+
+	void SetPlayerSprite(Sprite sprite)
+	{
+		if (bodyAnimator != null)
+			bodyAnimator.SetSprite(sprite);
+		else if (playerBody != null && sprite != null)
+			playerBody.sprite = sprite;
 	}
 }

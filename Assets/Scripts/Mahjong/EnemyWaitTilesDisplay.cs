@@ -43,19 +43,61 @@ namespace Mahjong
 		MahjongTileSpriteDatabase db;
 		Sprite backSprite;
 		Coroutine running;
+		static Texture2D cachedBackTexture;
+		static Sprite cachedBackSprite;
 
 		float CloseOffset => (tileWidth + closeGap) * 0.5f; // 2장 가까이 놓을 때 중심에서 offset
 		float TileSpan => tileWidth + spreadGap;            // 3장 인접 배치 시 인접 중심 간 거리
 
+		public static Sprite SharedBackSprite => GetOrCreateBackSprite();
+
 		public void Init(MahjongTileSpriteDatabase database)
 		{
 			db = database;
-			backSprite = db != null ? db.Placeholder : null;
+			backSprite = ResolveBackSprite(database);
 			ApplyBackedLayout(null);
 			if (group != null) group.alpha = 1f;
 		}
 
 		// ── 공개 API ─────────────────────────────────────────────
+
+		/// <summary>정보 공개 없이 현재 조합 형태에 맞는 뒷면 상태로 되돌린다.</summary>
+		public void ShowBacked(WaitGroup? nextGroup)
+		{
+			if (running != null) StopCoroutine(running);
+			running = null;
+			ApplyBackedLayout(nextGroup);
+			if (group != null) group.alpha = 1f;
+		}
+
+		/// <summary>플레이어에게 위험패(NeedTile) 한 장만 공개한다.</summary>
+		public void RevealWaitTile(WaitGroup g)
+		{
+			if (running != null) StopCoroutine(running);
+			running = null;
+			slotA.gameObject.SetActive(true);
+			SetTile(imgA, markA, default, backed: true);
+			slotNeed.gameObject.SetActive(true);
+			slotNeed.localScale = Vector3.one;
+			SetTile(imgNeed, markNeed, g.NeedTile, backed: false);
+			if (g.Type == EnemyComboType.Toitsu)
+			{
+				slotA.anchoredPosition = new Vector2(-CloseOffset, 0f);
+				slotB.gameObject.SetActive(false);
+				slotNeed.anchoredPosition = new Vector2(+CloseOffset, 0f);
+			}
+			else
+			{
+				slotB.gameObject.SetActive(true);
+				SetTile(imgB, markB, default, backed: true);
+				slotA.anchoredPosition = new Vector2(-TileSpan, 0f);
+				slotB.anchoredPosition = new Vector2(+TileSpan, 0f);
+				slotNeed.anchoredPosition = Vector2.zero;
+				slotB.localScale = Vector3.one;
+			}
+			slotA.localScale = Vector3.one;
+			if (group != null) group.alpha = 1f;
+		}
 
 		/// <summary>공격 시점에 실제 대기 조합을 애니메이션으로 공개. Combo/Shuntsu 형태에 따라 3가지 연출.</summary>
 		public Coroutine RevealAnimated(WaitGroup g)
@@ -149,6 +191,7 @@ namespace Mahjong
 
 		IEnumerator RevealRoutine(WaitGroup g)
 		{
+			ApplyBackedLayout(g);
 			var shape = Detect(g);
 			switch (shape)
 			{
@@ -295,7 +338,7 @@ namespace Mahjong
 				img.sprite = backSprite;
 				img.color = Color.white;
 				img.preserveAspect = true;
-				if (mark != null) { mark.text = "?"; mark.gameObject.SetActive(true); }
+				if (mark != null) mark.gameObject.SetActive(false);
 				return;
 			}
 			if (mark != null) mark.gameObject.SetActive(false);
@@ -307,8 +350,9 @@ namespace Mahjong
 			}
 			else
 			{
-				img.sprite = backSprite;
-				img.color = Color.white;
+				Sprite placeholder = db != null ? db.Placeholder : null;
+				img.sprite = placeholder;
+				img.color = placeholder != null ? Color.white : MahjongTileVisual.SuitColor(t.Suit);
 				if (mark != null)
 				{
 					mark.text = MahjongTileVisual.LabelFor(t);
@@ -321,13 +365,98 @@ namespace Mahjong
 		Sprite GetSpriteFor(Tile t)
 		{
 			if (db == null) return null;
-			switch (t.Suit)
+			return db.GetSprite(t);
+		}
+
+		static Sprite ResolveBackSprite(MahjongTileSpriteDatabase database)
+		{
+			Sprite sprite = database != null ? database.GetBackSprite() : null;
+			return sprite != null ? sprite : GetOrCreateBackSprite();
+		}
+
+		static Sprite GetOrCreateBackSprite()
+		{
+			if (cachedBackSprite != null)
+				return cachedBackSprite;
+
+			const int width = 64;
+			const int height = 88;
+			cachedBackTexture = new Texture2D(width, height, TextureFormat.RGBA32, false)
 			{
-				case Suit.Man: return db.GetMan(t.Value);
-				case Suit.Pin: return db.GetPin(t.Value);
-				case Suit.Sou: return db.GetSou(t.Value);
+				name = "GeneratedMahjongTileBack",
+				filterMode = FilterMode.Point,
+				wrapMode = TextureWrapMode.Clamp,
+				hideFlags = HideFlags.HideAndDontSave
+			};
+
+			var pixels = new Color32[width * height];
+			var transparent = new Color32(0, 0, 0, 0);
+			var outer = new Color32(31, 18, 10, 255);
+			var border = new Color32(124, 78, 34, 255);
+			var baseColor = new Color32(48, 27, 15, 255);
+			var pattern = new Color32(64, 37, 20, 255);
+			var accent = new Color32(155, 104, 45, 255);
+
+			for (int y = 0; y < height; y++)
+			{
+				for (int x = 0; x < width; x++)
+				{
+					int index = y * width + x;
+					if (!InsideRoundedRect(x, y, width, height, 7))
+					{
+						pixels[index] = transparent;
+						continue;
+					}
+
+					bool outerEdge = x < 3 || y < 3 || x >= width - 3 || y >= height - 3;
+					bool innerEdge = x < 7 || y < 7 || x >= width - 7 || y >= height - 7;
+					int diamond = Mathf.Abs(x - width / 2) * 2 + Mathf.Abs(y - height / 2);
+					bool diamondLine = diamond >= 32 && diamond <= 35;
+					bool diagonal = PositiveModulo(x - y, 14) <= 1;
+
+					if (outerEdge)
+						pixels[index] = outer;
+					else if (innerEdge || diamondLine)
+						pixels[index] = border;
+					else if (diagonal)
+						pixels[index] = pattern;
+					else if ((x + y) % 23 == 0)
+						pixels[index] = accent;
+					else
+						pixels[index] = baseColor;
+				}
 			}
-			return null;
+
+			cachedBackTexture.SetPixels32(pixels);
+			cachedBackTexture.Apply(false, true);
+
+			cachedBackSprite = Sprite.Create(
+				cachedBackTexture,
+				new Rect(0f, 0f, width, height),
+				new Vector2(0.5f, 0.5f),
+				100f,
+				0,
+				SpriteMeshType.FullRect);
+			cachedBackSprite.name = "GeneratedMahjongTileBackSprite";
+			cachedBackSprite.hideFlags = HideFlags.HideAndDontSave;
+			return cachedBackSprite;
+		}
+
+		static bool InsideRoundedRect(int x, int y, int width, int height, int radius)
+		{
+			int left = radius;
+			int right = width - radius - 1;
+			int bottom = radius;
+			int top = height - radius - 1;
+			int dx = x < left ? left - x : x > right ? x - right : 0;
+			int dy = y < bottom ? bottom - y : y > top ? y - top : 0;
+			return dx * dx + dy * dy <= radius * radius;
+		}
+
+		static int PositiveModulo(int value, int modulo)
+		{
+			int result = value % modulo;
+			return result < 0 ? result + modulo : result;
 		}
 	}
 }

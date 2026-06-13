@@ -10,6 +10,7 @@
 /[Bb]uilds/
 /[Ll]ogs/
 /[Uu]ser[Ss]ettings/
+/_delete_candidates/
 *.log
 
 # By default unity supports Blender asset imports, *.blend1 blender files do not need to be commited to version control.
@@ -98,15 +99,27 @@ InitTestScene*.unity*
 # Auto-generated scenes by play mode tests
 /[Aa]ssets/[Ii]nit[Tt]est[Ss]cene*.unity*
 
-# Project-local generated scenes. Battle/explore/menu scenes are rebuilt from Assets/Editor builders.
-/[Aa]ssets/[Ss]cenes/
+# Required runtime scenes are tracked generated artifacts; other local scenes remain ignored.
+/[Aa]ssets/[Ss]cenes/*
+!/[Aa]ssets/[Ss]cenes/MainMenu.unity
+!/[Aa]ssets/[Ss]cenes/MainMenu.unity.meta
+!/[Aa]ssets/[Ss]cenes/CharacterSelect.unity
+!/[Aa]ssets/[Ss]cenes/CharacterSelect.unity.meta
+!/[Aa]ssets/[Ss]cenes/GameExploreScene.unity
+!/[Aa]ssets/[Ss]cenes/GameExploreScene.unity.meta
+!/[Aa]ssets/[Ss]cenes/DiceBattleScene.unity
+!/[Aa]ssets/[Ss]cenes/DiceBattleScene.unity.meta
+!/[Aa]ssets/[Ss]cenes/MahjongBattleScene.unity
+!/[Aa]ssets/[Ss]cenes/MahjongBattleScene.unity.meta
+!/[Aa]ssets/[Ss]cenes/HoldemBattleScene.unity
+!/[Aa]ssets/[Ss]cenes/HoldemBattleScene.unity.meta
 
 # Prompt/history scratch files, local IDE settings, and generated working assets.
 /prompts/
 /.vscode/
 /grok_video_to_sprite/
 
-# Local images and visual debugging captures. This repository is code-only.
+# Local images and visual debugging captures.
 *.png
 *.png.meta
 *.jpg
@@ -126,6 +139,16 @@ InitTestScene*.unity*
 *.psd
 *.psd.meta
 
+# Game runtime art is tracked even though loose local image captures are ignored.
+!/[Aa]ssets/[Bb]ackgrounds/**
+!/[Aa]ssets/[Hh]oldem/**
+!/[Aa]ssets/[Mm]ahjong/**
+!/[Aa]ssets/[Mm]obs/**
+!/[Aa]ssets/[Pp]layer/**
+!/[Aa]ssets/[Ss]tory/**
+!/[Aa]ssets/[Tt]extures/**
+!/[Aa]ssets/[Uu][Ii]/**
+
 # Local archives and imported asset-pack drops that should not be committed wholesale.
 /*.7z
 /*.zip
@@ -141,10 +164,59 @@ InitTestScene*.unity*
 /[Aa]ssets/all_sounds.meta
 /[Aa]ssets/CensorEffect/
 /[Aa]ssets/CensorEffect.meta
-/[Aa]ssets/Dices/
+/[Aa]ssets/Dices/*
 /[Aa]ssets/Dices.meta
+!/[Aa]ssets/Dices/
+!/[Aa]ssets/Dices.meta
+!/[Aa]ssets/Dices/D6_mine.png
+!/[Aa]ssets/Dices/D6_mine.png.meta
+!/[Aa]ssets/Dices/Dice_Tray.png
+!/[Aa]ssets/Dices/Dice_Tray.png.meta
+!/[Aa]ssets/Dices/Generated/
+!/[Aa]ssets/Dices/Generated.meta
+/[Aa]ssets/Dices/Generated/*
+!/[Aa]ssets/Dices/Generated/D6Mine.mat
+!/[Aa]ssets/Dices/Generated/D6Mine.mat.meta
+!/[Aa]ssets/Dices/Generated/D6MineAtlas.png
+!/[Aa]ssets/Dices/Generated/D6MineAtlas.png.meta
+!/[Aa]ssets/Dices/Generated/D6MineMesh.asset
+!/[Aa]ssets/Dices/Generated/D6MineMesh.asset.meta
+!/[Aa]ssets/Dices/Prefabs/
+!/[Aa]ssets/Dices/Prefabs.meta
+/[Aa]ssets/Dices/Prefabs/*
+!/[Aa]ssets/Dices/Prefabs/Dice_d6_mine.prefab
+!/[Aa]ssets/Dices/Prefabs/Dice_d6_mine.prefab.meta
 /[Aa]ssets/TextMesh Pro/
 /[Aa]ssets/TextMesh Pro.meta
+!/[Aa]ssets/TextMesh Pro/
+!/[Aa]ssets/TextMesh Pro.meta
+!/[Aa]ssets/TextMesh Pro/Fonts/
+!/[Aa]ssets/TextMesh Pro/Fonts.meta
+/[Aa]ssets/TextMesh Pro/Fonts/*
+!/[Aa]ssets/TextMesh Pro/Fonts/Mona12.asset
+!/[Aa]ssets/TextMesh Pro/Fonts/Mona12.asset.meta
+!/[Aa]ssets/TextMesh Pro/Fonts/Mona12-Bold.asset
+!/[Aa]ssets/TextMesh Pro/Fonts/Mona12-Bold.asset.meta
+!/[Aa]ssets/TextMesh Pro/Fonts/Mona12Emoji.asset
+!/[Aa]ssets/TextMesh Pro/Fonts/Mona12Emoji.asset.meta
+!/[Aa]ssets/TextMesh Pro/Fonts/LiberationSans.ttf
+!/[Aa]ssets/TextMesh Pro/Fonts/LiberationSans.ttf.meta
+!/[Aa]ssets/TextMesh Pro/Fonts/LiberationSans - OFL.txt
+!/[Aa]ssets/TextMesh Pro/Fonts/LiberationSans - OFL.txt.meta
+!/[Aa]ssets/TextMesh Pro/Resources/
+!/[Aa]ssets/TextMesh Pro/Resources.meta
+!/[Aa]ssets/TextMesh Pro/Resources/**
+!/[Aa]ssets/TextMesh Pro/Sprites/
+!/[Aa]ssets/TextMesh Pro/Sprites.meta
+!/[Aa]ssets/TextMesh Pro/Sprites/EmojiOne.png
+!/[Aa]ssets/TextMesh Pro/Sprites/EmojiOne.png.meta
+!/[Aa]ssets/TextMesh Pro/Sprites/EmojiOne.json
+!/[Aa]ssets/TextMesh Pro/Sprites/EmojiOne.json.meta
+!/[Aa]ssets/TextMesh Pro/Sprites/EmojiOne Attribution.txt
+!/[Aa]ssets/TextMesh Pro/Sprites/EmojiOne Attribution.txt.meta
+!/[Aa]ssets/TextMesh Pro/Shaders/
+!/[Aa]ssets/TextMesh Pro/Shaders.meta
+!/[Aa]ssets/TextMesh Pro/Shaders/**
 
 # Generated/fallback Unity assets and recovery dumps.
 /[Aa]ssets/[Gg]enerated/

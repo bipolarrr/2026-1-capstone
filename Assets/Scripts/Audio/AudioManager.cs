@@ -15,13 +15,20 @@ public class AudioManager : MonoBehaviour
 
 	/// <summary>프로젝트 전역 기본 볼륨. 모든 AudioSource/PlayOneShot은 AudioListener를 통해 곱해진다.</summary>
 	public const float GlobalVolume = 0.02f;
+	const string SfxVolumeKey = "Settings.SfxVolume";
+	const string BgmVolumeKey = "Settings.BgmVolume";
+	const float DefaultSfxVolume = 0.8f;
+	const float DefaultBgmVolume = 0.8f;
 
 	static AudioManager instance;
 	static readonly Dictionary<string, AudioClip> lookup = new Dictionary<string, AudioClip>();
+	static float sfxVolume = DefaultSfxVolume;
+	static float bgmVolume = DefaultBgmVolume;
 
 	[RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
 	static void ApplyGlobalVolume()
 	{
+		LoadSettings();
 		AudioListener.volume = GlobalVolume;
 	}
 
@@ -39,6 +46,7 @@ public class AudioManager : MonoBehaviour
 		}
 		if (source == null)
 			source = GetComponent<AudioSource>();
+		ApplySfxVolumeToSources();
 		if (drumRollSource != null && drumRollClip != null)
 			DiceDrumRollAudio.Configure(drumRollSource, drumRollClip);
 	}
@@ -73,6 +81,47 @@ public class AudioManager : MonoBehaviour
 		}
 		var src = instance.source;
 		src.pitch = pitch;
-		src.PlayOneShot(clip, volume);
+		src.PlayOneShot(clip, Mathf.Clamp01(volume));
+	}
+
+	public static void LoadSettings()
+	{
+		sfxVolume = Mathf.Clamp01(PlayerPrefs.GetFloat(SfxVolumeKey, DefaultSfxVolume));
+		bgmVolume = Mathf.Clamp01(PlayerPrefs.GetFloat(BgmVolumeKey, DefaultBgmVolume));
+		ApplySfxVolumeToSources();
+	}
+
+	public static void SetSfxVolume(float value)
+	{
+		sfxVolume = Mathf.Clamp01(value);
+		PlayerPrefs.SetFloat(SfxVolumeKey, sfxVolume);
+		PlayerPrefs.Save();
+		ApplySfxVolumeToSources();
+	}
+
+	public static float GetSfxVolume()
+	{
+		return sfxVolume;
+	}
+
+	public static void SetBgmVolume(float value)
+	{
+		bgmVolume = Mathf.Clamp01(value);
+		PlayerPrefs.SetFloat(BgmVolumeKey, bgmVolume);
+		PlayerPrefs.Save();
+	}
+
+	public static float GetBgmVolume()
+	{
+		return bgmVolume;
+	}
+
+	static void ApplySfxVolumeToSources()
+	{
+		if (instance == null) return;
+		if (instance.source != null)
+			instance.source.volume = sfxVolume;
+		if (instance.drumRollSource != null)
+			instance.drumRollSource.volume = sfxVolume;
 	}
 }

@@ -8,6 +8,10 @@ namespace Mahjong
 	public static class MahjongDamageTable
 	{
 		public const int FullAoeHalfHearts = 16;
+		public const int PlayerWinBattleDamageMultiplier = 3;
+		public const float MahjongYakuFocusDamageBonusRate = 0.25f;
+		public const int MahjongPartialFocusDamageBonus = 1;
+		public const int MahjongSafetyCharmDamageReduction = 1;
 
 		public static int GetWinDamageHalfHearts(YakuResult yaku)
 		{
@@ -28,6 +32,23 @@ namespace Mahjong
 			return 1;
 		}
 
+		public static int ScalePlayerWinDamageForBattle(int baseDamage)
+		{
+			if (baseDamage <= 0) return 0;
+			return baseDamage * PlayerWinBattleDamageMultiplier;
+		}
+
+		public static int ApplyPowerUpsToPlayerWinBattleDamage(
+			int battleDamage,
+			System.Collections.Generic.IReadOnlyList<PowerUpType> powerUps)
+		{
+			if (battleDamage <= 0) return 0;
+			if (!ContainsPowerUp(powerUps, PowerUpType.MahjongYakuFocus))
+				return battleDamage;
+			int bonus = (int)System.Math.Ceiling(battleDamage * MahjongYakuFocusDamageBonusRate);
+			return battleDamage + System.Math.Max(1, bonus);
+		}
+
 		/// <summary>중간 포기(50% 위력) 데미지. 멘츠 0.5 + 머리 0.25 + 깡 +0.25 (절반하트 단위, 올림).</summary>
 		public static int GetPartialDamageHalfHearts(PartialBreakdown b)
 		{
@@ -37,6 +58,40 @@ namespace Mahjong
 			return rounded < 0 ? 0 : rounded;
 		}
 
+		public static int ApplyPowerUpsToPartialDamage(
+			int baseDamage,
+			System.Collections.Generic.IReadOnlyList<PowerUpType> powerUps)
+		{
+			if (baseDamage <= 0) return 0;
+			return ContainsPowerUp(powerUps, PowerUpType.MahjongPartialFocus)
+				? baseDamage + MahjongPartialFocusDamageBonus
+				: baseDamage;
+		}
+
+		public static int ApplyPowerUpsToEnemyDamage(
+			int incomingDamage,
+			System.Collections.Generic.IReadOnlyList<PowerUpType> powerUps)
+		{
+			if (incomingDamage <= 0) return 0;
+			if (!ContainsPowerUp(powerUps, PowerUpType.MahjongSafetyCharm))
+				return incomingDamage;
+			return System.Math.Max(0, incomingDamage - MahjongSafetyCharmDamageReduction);
+		}
+
 		public static int GetAoeDamageOnNonTarget(int targetDamage) => targetDamage; // 100%/50% 모두 모든 적에 동일 적용
+
+		static bool ContainsPowerUp(
+			System.Collections.Generic.IReadOnlyList<PowerUpType> powerUps,
+			PowerUpType type)
+		{
+			if (powerUps == null)
+				return false;
+			for (int i = 0; i < powerUps.Count; i++)
+			{
+				if (powerUps[i] == type)
+					return true;
+			}
+			return false;
+		}
 	}
 }

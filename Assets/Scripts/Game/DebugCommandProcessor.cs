@@ -24,6 +24,8 @@ public static class DebugCommandProcessor
 				return HandleSetDice(parts);
 			case "/kill":
 				return HandleKill(parts);
+			case "/sprite":
+				return HandleSprite(parts);
 			case "/stage":
 				return HandleStage(parts);
 			case "/nextround":
@@ -64,9 +66,9 @@ public static class DebugCommandProcessor
 		// 현재 전투(있다면)를 취소하고 해당 스테이지 1라운드로 이동
 		GameSessionManager.CurrentStageId    = targetId;
 		GameSessionManager.CurrentEventIndex = 0;
-		GameSessionManager.BattleEnemies.Clear();
-		GameSessionManager.IsBossBattle      = false;
-		GameSessionManager.LastBattleResult  = BattleResult.None;
+		GameSessionManager.ResetExploreMapRoute();
+		GameSessionManager.PrepareBattleEnemies(null, false);
+		GameSessionManager.ResetBattleResult();
 
 		Debug.Log($"[Debug] /stage → {targetId} ({stage.displayName}) 1라운드로 이동");
 
@@ -191,6 +193,62 @@ public static class DebugCommandProcessor
 		return battle.DebugKillEnemies(indices.ToArray());
 	}
 
+	static string HandleSprite(string[] parts)
+	{
+		if (parts.Length < 4)
+			return SpriteUsage();
+
+		string action = parts[1].ToLowerInvariant();
+		if (action != "play")
+			return $"[오류] 알 수 없는 sprite 동작: {parts[1]}\n{SpriteUsage()}";
+
+		var battle = FindBattle();
+		if (battle == null)
+			return "[오류] /sprite play는 전투 씬에서만 사용 가능합니다.";
+
+		string target = parts[2].ToLowerInvariant();
+		if (target == "player")
+		{
+			if (parts.Length != 4 && parts.Length != 5)
+				return SpriteUsage();
+			if (!TryParseOptionalLoopSeconds(parts, 4, out float loopSeconds, out string error))
+				return error;
+			return battle.DebugPlaySprite(target, -1, parts[3], loopSeconds);
+		}
+		if (target == "mob")
+		{
+			if (parts.Length != 5)
+				return SpriteUsage();
+			if (!int.TryParse(parts[3], out int index))
+				return $"[오류] mob 인덱스가 유효한 숫자가 아닙니다: {parts[3]}";
+			return battle.DebugPlaySprite(target, index, parts[4], -1f);
+		}
+
+		return $"[오류] 알 수 없는 sprite 대상: {parts[2]}. 현재 지원: player, mob";
+	}
+
+	static string SpriteUsage()
+	{
+		return "[오류] 사용법:\n" +
+			"  /sprite play player <idle|lowhp|smallhit|stronghit|jump|defense|debuff|death> [loopSeconds]\n" +
+			"  /sprite play mob <index> <idle|attack|hit|death>\n" +
+			"예: /sprite play player defense 3 | /sprite play player smallhit | /sprite play mob 0 idle";
+	}
+
+	static bool TryParseOptionalLoopSeconds(string[] parts, int index, out float loopSeconds, out string error)
+	{
+		loopSeconds = -1f;
+		error = null;
+		if (parts.Length <= index)
+			return true;
+		if (!float.TryParse(parts[index], out loopSeconds) || loopSeconds <= 0f)
+		{
+			error = $"[오류] 반복구간 재생시간은 0보다 큰 초 단위 숫자여야 합니다: {parts[index]}";
+			return false;
+		}
+		return true;
+	}
+
 	static string HandleNextRound()
 	{
 		var stage = GameSessionManager.CurrentStage;
@@ -207,9 +265,7 @@ public static class DebugCommandProcessor
 
 		// 현재 라운드를 "정상 클리어"한 것으로 처리 — Explore 씬의 Start가 BattleResult.Won 분기에서
 		// CurrentEventIndex를 증가시키고 StartWalking으로 자연스럽게 다음 이벤트를 트리거한다.
-		GameSessionManager.BattleEnemies.Clear();
-		GameSessionManager.IsBossBattle     = false;
-		GameSessionManager.LastBattleResult = BattleResult.Won;
+		GameSessionManager.CompleteBattleWon();
 
 		Debug.Log($"[Debug] /nextround stage={stage.id} round={idx}({round}) → 다음 라운드로 강제 진행");
 
@@ -225,6 +281,9 @@ public static class DebugCommandProcessor
 			"/kill player        — 플레이어 즉사\n" +
 			"/kill mob @a        — 모든 적 즉사\n" +
 			"/kill mob 0 1 2     — 지정 인덱스 적 즉사\n" +
+			"/sprite play player <idle|lowhp|smallhit|stronghit|jump|defense|debuff|death> [loopSeconds]\n" +
+			"/sprite play mob <index> <idle|attack|hit|death>\n" +
+			"                    — 플레이어/적 스프라이트 애니메이션 테스트\n" +
 			"/stage              — 등록된 스테이지 목록\n" +
 			"/stage <index|name|id>  — 해당 스테이지 1라운드로 이동 (예: /stage 0, /stage forest, /stage forest_1)\n" +
 			"/nextround          — 현재 라운드를 정상 클리어한 것으로 처리해 다음 라운드로\n" +
@@ -239,6 +298,8 @@ public static class DebugCommandProcessor
 		if (dice != null) return dice;
 		var mah = Object.FindFirstObjectByType<Mahjong.MahjongBattleController>();
 		if (mah != null) return mah;
+		var holdem = Object.FindFirstObjectByType<Holdem.HoldemBattleController>();
+		if (holdem != null) return holdem;
 		return null;
 	}
 }

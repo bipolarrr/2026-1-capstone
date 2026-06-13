@@ -137,61 +137,15 @@ public static class EnemyAttackPositionResolver
 
 	static HorizontalBounds VisualHorizontalBounds(RectTransform rt, float fallbackX)
 	{
-		if (rt == null)
+		if (!EnemyVisualBoundsResolver.TryResolveWorldBounds(rt, out Rect bounds))
 			return new HorizontalBounds(fallbackX, fallbackX);
 
-		var rect = rt.rect;
-		float xMin = rect.xMin;
-		float xMax = rect.xMax;
-
-		var image = rt.GetComponent<Image>();
-		if (image != null && image.preserveAspect && image.sprite != null && rect.height > 0f)
-		{
-			var spriteRect = image.sprite.rect;
-			if (spriteRect.width > 0f && spriteRect.height > 0f)
-			{
-				float spriteAspect = spriteRect.width / spriteRect.height;
-				float rectAspect = rect.width / rect.height;
-				if (spriteAspect < rectAspect)
-				{
-					float visibleWidth = rect.height * spriteAspect;
-					float centerX = rect.center.x;
-					xMin = centerX - visibleWidth * 0.5f;
-					xMax = centerX + visibleWidth * 0.5f;
-				}
-			}
-		}
-
-		ApplyKnownVisibleSpriteInsets(rt, ref xMin, ref xMax);
-
-		float worldMin = rt.TransformPoint(new Vector3(xMin, rect.center.y, 0f)).x;
-		float worldMax = rt.TransformPoint(new Vector3(xMax, rect.center.y, 0f)).x;
-		return new HorizontalBounds(Mathf.Min(worldMin, worldMax), Mathf.Max(worldMin, worldMax));
-	}
-
-	static void ApplyKnownVisibleSpriteInsets(RectTransform rt, ref float xMin, ref float xMax)
-	{
-		if (rt == null || rt.name != "PlayerBody")
-			return;
-
-		const float PlayerVisibleLeftRatio = 0.179f;
-		const float PlayerVisibleRightRatio = 0.823f;
-
-		float fullMin = xMin;
-		float width = xMax - xMin;
-		xMin = fullMin + width * PlayerVisibleLeftRatio;
-		xMax = fullMin + width * PlayerVisibleRightRatio;
+		return new HorizontalBounds(bounds.xMin, bounds.xMax);
 	}
 
 	static Vector3 RectPointWorld(RectTransform rt, float normalizedX, float normalizedY, Vector3 fallback)
 	{
-		if (rt == null)
-			return fallback;
-
-		var rect = rt.rect;
-		float x = Mathf.Lerp(rect.xMin, rect.xMax, normalizedX);
-		float y = Mathf.Lerp(rect.yMin, rect.yMax, normalizedY);
-		return rt.TransformPoint(new Vector3(x, y, 0f));
+		return EnemyVisualBoundsResolver.ResolveWorldPoint(rt, normalizedX, normalizedY, fallback);
 	}
 
 	readonly struct HorizontalBounds
@@ -205,5 +159,240 @@ public static class EnemyAttackPositionResolver
 			this.min = min;
 			this.max = max;
 		}
+	}
+}
+
+public readonly struct EnemyVisualBounds
+{
+	public readonly Rect rect;
+
+	public EnemyVisualBounds(Rect rect)
+	{
+		this.rect = rect;
+	}
+
+	public Vector2 center => rect.center;
+	public float xMin => rect.xMin;
+	public float xMax => rect.xMax;
+	public float yMin => rect.yMin;
+	public float yMax => rect.yMax;
+	public float width => Mathf.Max(0f, rect.width);
+	public float height => Mathf.Max(0f, rect.height);
+
+	public EnemyVisualBounds Padded(float padding)
+	{
+		float p = Mathf.Max(0f, padding);
+		return new EnemyVisualBounds(Rect.MinMaxRect(
+			rect.xMin - p,
+			rect.yMin - p,
+			rect.xMax + p,
+			rect.yMax + p));
+	}
+}
+
+public static class EnemyVisualBoundsResolver
+{
+	const float PlayerVisibleLeftRatio = 0.179f;
+	const float PlayerVisibleRightRatio = 0.823f;
+
+	public static bool TryResolveBoundsIn(Image image, RectTransform reference, out EnemyVisualBounds bounds)
+	{
+		RectTransform source = image != null ? image.rectTransform : null;
+		return TryResolveBoundsIn(source, reference, out bounds);
+	}
+
+	public static bool TryResolveBoundsIn(RectTransform source, RectTransform reference, out EnemyVisualBounds bounds)
+	{
+		return TryResolveBoundsIn(source, reference, useImageVisualRect: true, out bounds);
+	}
+
+	public static bool TryResolveRectTransformBoundsIn(RectTransform source, RectTransform reference,
+		out EnemyVisualBounds bounds)
+	{
+		return TryResolveBoundsIn(source, reference, useImageVisualRect: false, out bounds);
+	}
+
+	static bool TryResolveBoundsIn(RectTransform source, RectTransform reference, bool useImageVisualRect,
+		out EnemyVisualBounds bounds)
+	{
+		bounds = default;
+		if (source == null || reference == null)
+			return false;
+
+		Rect localRect = useImageVisualRect
+			? ResolveRenderedLocalRect(source)
+			: source.rect;
+		bounds = new EnemyVisualBounds(LocalRectToReferenceRect(source, reference, localRect));
+		return true;
+	}
+
+	public static bool TryResolveWorldBounds(RectTransform source, out Rect bounds)
+	{
+		bounds = default;
+		if (source == null)
+			return false;
+
+		Rect localRect = ResolveRenderedLocalRect(source);
+		Vector3 p0 = source.TransformPoint(new Vector3(localRect.xMin, localRect.yMin, 0f));
+		Vector3 p1 = source.TransformPoint(new Vector3(localRect.xMin, localRect.yMax, 0f));
+		Vector3 p2 = source.TransformPoint(new Vector3(localRect.xMax, localRect.yMax, 0f));
+		Vector3 p3 = source.TransformPoint(new Vector3(localRect.xMax, localRect.yMin, 0f));
+		bounds = RectFromPoints(p0, p1, p2, p3);
+		return true;
+	}
+
+	public static Vector3 ResolveWorldPoint(RectTransform source, float normalizedX, float normalizedY,
+		Vector3 fallback)
+	{
+		if (source == null)
+			return fallback;
+
+		Rect localRect = ResolveRenderedLocalRect(source);
+		float x = Mathf.Lerp(localRect.xMin, localRect.xMax, Mathf.Clamp01(normalizedX));
+		float y = Mathf.Lerp(localRect.yMin, localRect.yMax, Mathf.Clamp01(normalizedY));
+		return source.TransformPoint(new Vector3(x, y, 0f));
+	}
+
+	public static Rect ResolveRenderedLocalRect(RectTransform source)
+	{
+		if (source == null)
+			return Rect.zero;
+
+		var image = source.GetComponent<Image>();
+		return ResolveRenderedLocalRect(image, source.rect);
+	}
+
+	public static Rect ResolveRenderedLocalRect(Image image)
+	{
+		return image != null ? ResolveRenderedLocalRect(image, image.rectTransform.rect) : Rect.zero;
+	}
+
+	static Rect ResolveRenderedLocalRect(Image image, Rect rect)
+	{
+		if (image == null)
+			return rect;
+
+		Sprite sprite = image.sprite;
+		if (image.preserveAspect && sprite != null)
+			rect = ApplyPreserveAspect(rect, sprite);
+
+		if (image.useSpriteMesh && sprite != null)
+			rect = ApplySpriteMeshBounds(rect, sprite);
+
+		ApplyKnownVisibleSpriteInsets(image.rectTransform, ref rect);
+		return rect;
+	}
+
+	static Rect ApplyPreserveAspect(Rect rect, Sprite sprite)
+	{
+		if (sprite == null || rect.width <= 0f || rect.height <= 0f)
+			return rect;
+
+		Rect spriteRect = sprite.rect;
+		if (spriteRect.width <= 0f || spriteRect.height <= 0f)
+			return rect;
+
+		float spriteAspect = spriteRect.width / spriteRect.height;
+		float rectAspect = rect.width / rect.height;
+		if (Mathf.Approximately(spriteAspect, rectAspect))
+			return rect;
+
+		if (spriteAspect > rectAspect)
+		{
+			float visibleHeight = rect.width / spriteAspect;
+			float centerY = rect.center.y;
+			return Rect.MinMaxRect(rect.xMin, centerY - visibleHeight * 0.5f,
+				rect.xMax, centerY + visibleHeight * 0.5f);
+		}
+
+		float visibleWidth = rect.height * spriteAspect;
+		float centerX = rect.center.x;
+		return Rect.MinMaxRect(centerX - visibleWidth * 0.5f, rect.yMin,
+			centerX + visibleWidth * 0.5f, rect.yMax);
+	}
+
+	static Rect ApplySpriteMeshBounds(Rect rect, Sprite sprite)
+	{
+		if (sprite == null)
+			return rect;
+
+		Vector2[] vertices = sprite.vertices;
+		if (vertices == null || vertices.Length == 0)
+			return rect;
+
+		float pixelsPerUnit = Mathf.Max(0.0001f, sprite.pixelsPerUnit);
+		Rect spriteRect = sprite.rect;
+		if (spriteRect.width <= 0f || spriteRect.height <= 0f)
+			return rect;
+
+		Vector2 pivot = sprite.pivot;
+		float fullMinX = -pivot.x / pixelsPerUnit;
+		float fullMaxX = (spriteRect.width - pivot.x) / pixelsPerUnit;
+		float fullMinY = -pivot.y / pixelsPerUnit;
+		float fullMaxY = (spriteRect.height - pivot.y) / pixelsPerUnit;
+		if (Mathf.Abs(fullMaxX - fullMinX) <= 0.0001f || Mathf.Abs(fullMaxY - fullMinY) <= 0.0001f)
+			return rect;
+
+		float minX = float.PositiveInfinity;
+		float minY = float.PositiveInfinity;
+		float maxX = float.NegativeInfinity;
+		float maxY = float.NegativeInfinity;
+		for (int i = 0; i < vertices.Length; i++)
+		{
+			Vector2 vertex = vertices[i];
+			minX = Mathf.Min(minX, vertex.x);
+			minY = Mathf.Min(minY, vertex.y);
+			maxX = Mathf.Max(maxX, vertex.x);
+			maxY = Mathf.Max(maxY, vertex.y);
+		}
+
+		if (float.IsNaN(minX) || float.IsNaN(maxX) || float.IsNaN(minY) || float.IsNaN(maxY)
+			|| float.IsInfinity(minX) || float.IsInfinity(maxX)
+			|| float.IsInfinity(minY) || float.IsInfinity(maxY)
+			|| maxX <= minX || maxY <= minY)
+			return rect;
+
+		float nxMin = Mathf.Clamp01(Mathf.InverseLerp(fullMinX, fullMaxX, minX));
+		float nxMax = Mathf.Clamp01(Mathf.InverseLerp(fullMinX, fullMaxX, maxX));
+		float nyMin = Mathf.Clamp01(Mathf.InverseLerp(fullMinY, fullMaxY, minY));
+		float nyMax = Mathf.Clamp01(Mathf.InverseLerp(fullMinY, fullMaxY, maxY));
+		return Rect.MinMaxRect(
+			Mathf.Lerp(rect.xMin, rect.xMax, nxMin),
+			Mathf.Lerp(rect.yMin, rect.yMax, nyMin),
+			Mathf.Lerp(rect.xMin, rect.xMax, nxMax),
+			Mathf.Lerp(rect.yMin, rect.yMax, nyMax));
+	}
+
+	static void ApplyKnownVisibleSpriteInsets(RectTransform source, ref Rect rect)
+	{
+		if (source == null || source.name != "PlayerBody")
+			return;
+
+		float xMin = rect.xMin;
+		float width = rect.width;
+		rect.xMin = xMin + width * PlayerVisibleLeftRatio;
+		rect.xMax = xMin + width * PlayerVisibleRightRatio;
+	}
+
+	static Rect LocalRectToReferenceRect(RectTransform source, RectTransform reference, Rect localRect)
+	{
+		Vector3 p0 = reference.InverseTransformPoint(
+			source.TransformPoint(new Vector3(localRect.xMin, localRect.yMin, 0f)));
+		Vector3 p1 = reference.InverseTransformPoint(
+			source.TransformPoint(new Vector3(localRect.xMin, localRect.yMax, 0f)));
+		Vector3 p2 = reference.InverseTransformPoint(
+			source.TransformPoint(new Vector3(localRect.xMax, localRect.yMax, 0f)));
+		Vector3 p3 = reference.InverseTransformPoint(
+			source.TransformPoint(new Vector3(localRect.xMax, localRect.yMin, 0f)));
+		return RectFromPoints(p0, p1, p2, p3);
+	}
+
+	static Rect RectFromPoints(Vector3 p0, Vector3 p1, Vector3 p2, Vector3 p3)
+	{
+		float xMin = Mathf.Min(Mathf.Min(p0.x, p1.x), Mathf.Min(p2.x, p3.x));
+		float xMax = Mathf.Max(Mathf.Max(p0.x, p1.x), Mathf.Max(p2.x, p3.x));
+		float yMin = Mathf.Min(Mathf.Min(p0.y, p1.y), Mathf.Min(p2.y, p3.y));
+		float yMax = Mathf.Max(Mathf.Max(p0.y, p1.y), Mathf.Max(p2.y, p3.y));
+		return Rect.MinMaxRect(xMin, yMin, xMax, yMax);
 	}
 }

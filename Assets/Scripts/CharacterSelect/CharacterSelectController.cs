@@ -38,20 +38,21 @@ public class CharacterSelectController : MonoBehaviour
 	void Update()
 	{
 		var kb = Keyboard.current;
-		if (kb == null) return;
-
-		if (kb.spaceKey.isPressed)
+		if (kb != null)
 		{
-			spaceHeldTime += Time.deltaTime;
-			if (spaceHeldTime >= SpaceSkipThreshold)
+			if (kb.spaceKey.isPressed)
 			{
-				spaceHeldTime = 0f;
-				SkipToWeaponSelect();
+				spaceHeldTime += Time.deltaTime;
+				if (spaceHeldTime >= SpaceSkipThreshold)
+				{
+					spaceHeldTime = 0f;
+					SkipToWeaponSelect();
+				}
 			}
-		}
 
-		if (kb.spaceKey.wasReleasedThisFrame)
-			spaceHeldTime = 0f;
+			if (kb.spaceKey.wasReleasedThisFrame)
+				spaceHeldTime = 0f;
+		}
 	}
 
 	// ─── 버튼 이벤트 진입점 ───────────────────────────────────────

@@ -22,11 +22,18 @@ This file owns gameplay constants, layout tuning, and visual size tables. If bal
 | Dice | `settleConfirmTime` | `0.3s` |
 | Battle | Enemy damage formula | `ceil(rank × multiplier)` half-hearts |
 | Battle | Player attack rolls | `3` per round |
+| Battle | Player idle sprite playback | `24 fps` |
+| Battle | Enemy sprite playback | `12 fps` |
+| Battle | Bat attack sprite playback | `30 fps` |
+| Battle | Mid-range enemy approach | `55%` toward melee point |
+| Battle | Unique-range enemy approach | stays at home slot |
 | Battle | Defense rolls (no combo) | `1` |
 | Battle | Defense rolls (combo) | `3` |
 | Battle | Splash ratio | combo `50%` / non-combo `0%` |
 | Battle | Boss HP | `120` |
 | Battle | Boss rank | `5` |
+| Mahjong | Enemy tsumo chance | `2%` per living enemy per turn |
+| Mahjong | Rank 3 wait reveal chance | `5%` per turn |
 | Game | Player max hearts | `5` (10 half-hearts) |
 | Explore | Walk duration | `2.5s` |
 | Explore | Scroll speed | `120 px/s` |
@@ -37,7 +44,7 @@ This file owns gameplay constants, layout tuning, and visual size tables. If bal
 
 | Combo | Multiplier | Rank 3 | Rank 5 |
 |---|---:|---:|---:|
-| None | ×1 | 3 half | 5 half |
+| None | ×0.5 | 2 half | 3 half |
 | Small Straight | ×1.5 | - | 8 half |
 | Full House | ×1.5 | - | 8 half |
 | Large Straight | ×2 | - | 10 half |
@@ -49,10 +56,31 @@ Combos require rank ≥ 4 (4+ dice).
 ## Battle UI Layout
 
 ```text
-panelMargin=0.05, panelGap=0.01, panelMid=0.50
-left:  0.05 ~ 0.49  (dice viewport + vault preview)
-right: 0.51 ~ 0.95  (battle log + buttons + info text)
+bottomFocusY=0.02~0.315 (screen bottom third with margins)
+fieldMaskY=0.333~1.000, battleGroundY=0.44
+DiceBattle: left 0.00~0.26 action buttons, right 0.28~1.00 dice viewport + held dice
+MahjongBattle: top 0.76~1.00 action buttons, middle 0.43~0.74 dora/discards, bottom 0.00~0.40 hand
+Message popup and history log cover the same bottom focus area when active.
 ```
+
+## Enemy Dice Overlay
+
+| Setting | Value |
+|---|---|
+| Overlay aspect | `16:9` |
+| Overlay size | fixed `298.7 × 168 px` for every enemy |
+| Head gap | `8 px` |
+| Background color | `RGBA(0.10, 0.18, 0.32, 0.92)` |
+| Outline color | `RGBA(0.35, 0.62, 1.00, 0.65)`, distance `(2, -2)` |
+| RenderTexture inset | `0 px`; viewport fills overlay so corners match arena bounds |
+| Placement anchor | above enemy name/HP panel |
+| Camera mode | orthographic |
+| Camera offset | `(0, 7, 0)` from enemy dice vault center |
+| Camera rotation | `(90, 0, 0)` |
+| Camera orthographic size | `1.80` |
+| Dice scale | `0.90` |
+| Dice spacing | `1.00` |
+| Arena size | `(6.4, 8.0, 3.6)` |
 
 ## Explore Encounter Presentation
 

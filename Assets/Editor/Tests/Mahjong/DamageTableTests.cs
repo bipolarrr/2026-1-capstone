@@ -1,5 +1,6 @@
 using NUnit.Framework;
 using Mahjong;
+using System.Collections.Generic;
 
 namespace MahjongTests
 {
@@ -37,6 +38,35 @@ namespace MahjongTests
 			Assert.AreEqual(MahjongDamageTable.FullAoeHalfHearts * 2, MahjongDamageTable.GetWinDamageHalfHearts(y));
 		}
 
+		[TestCase(1, 3)]
+		[TestCase(3, 9)]
+		[TestCase(4, 12)]
+		[TestCase(16, 48)]
+		[TestCase(32, 96)]
+		public void PlayerWinBattleDamage_ScalesBaseWinDamageByThree(int baseDamage, int expected)
+		{
+			Assert.AreEqual(expected, MahjongDamageTable.ScalePlayerWinDamageForBattle(baseDamage));
+		}
+
+		[TestCase(0)]
+		[TestCase(-1)]
+		public void PlayerWinBattleDamage_NonPositiveInput_StaysZero(int baseDamage)
+		{
+			Assert.AreEqual(0, MahjongDamageTable.ScalePlayerWinDamageForBattle(baseDamage));
+		}
+
+		[Test]
+		public void MahjongYakuFocus_IncreasesPlayerWinBattleDamage()
+		{
+			int scaled = MahjongDamageTable.ScalePlayerWinDamageForBattle(4);
+
+			int boosted = MahjongDamageTable.ApplyPowerUpsToPlayerWinBattleDamage(
+				scaled,
+				new List<PowerUpType> { PowerUpType.MahjongYakuFocus });
+
+			Assert.AreEqual(15, boosted);
+		}
+
 		[Test]
 		public void NoYaku_GivesZero()
 		{
@@ -58,6 +88,26 @@ namespace MahjongTests
 			var b = new PartialBreakdown { Shuntsu = 2, Koutsu = 1, Kantsu = 1, Pair = 1 };
 			// (2+1)*0.5 + 0.25 + 1*0.75 = 2.5 → ×0.5 = 1.25 → ceil 2
 			Assert.AreEqual(2, MahjongDamageTable.GetPartialDamageHalfHearts(b));
+		}
+
+		[Test]
+		public void MahjongPartialFocus_IncreasesPositivePartialDamage()
+		{
+			int boosted = MahjongDamageTable.ApplyPowerUpsToPartialDamage(
+				1,
+				new List<PowerUpType> { PowerUpType.MahjongPartialFocus });
+
+			Assert.AreEqual(2, boosted);
+		}
+
+		[Test]
+		public void MahjongSafetyCharm_ReducesEnemyDamage()
+		{
+			int reduced = MahjongDamageTable.ApplyPowerUpsToEnemyDamage(
+				3,
+				new List<PowerUpType> { PowerUpType.MahjongSafetyCharm });
+
+			Assert.AreEqual(2, reduced);
 		}
 	}
 }

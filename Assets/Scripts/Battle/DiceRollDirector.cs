@@ -46,12 +46,11 @@ public class DiceRollDirector : MonoBehaviour
 	[SerializeField] Vector3 vaultCenter;
 
 	[Header("주사위 슬롯 레이아웃")]
-	// 비홀드 주사위들은 slotCenter를 기준으로 slotSpacing 간격, 항상 대칭 배치.
-	// 짝수 개: 중앙에 주사위 없음 ( ±spacing/2, ±spacing*3/2 ... ).
-	// 홀수 개: 중앙에 주사위 1개 ( 0, ±spacing, ... ).
-	// 공식: x_i = (i - (N-1)/2) * slotSpacing (i는 0..N-1 슬롯 인덱스, N은 비홀드 개수).
+	// 비홀드 주사위 5개는 위 3개/아래 2개 그리드로 배치.
+	// 그 외 개수는 slotCenter를 기준으로 slotSpacing 간격의 한 줄 대칭 배치.
 	[SerializeField] Vector3 slotCenter;
-	[SerializeField] float   slotSpacing = 1.4f;
+	[SerializeField] float   slotSpacing = 1.05f;
+	[SerializeField] float   slotRowSpacing = 1.05f;
 
 	[Header("저장 슬롯 스프라이트 표시")]
 	[SerializeField] Image[]  heldDiceImages;
@@ -274,6 +273,25 @@ public class DiceRollDirector : MonoBehaviour
 	Vector3 GetSlotPosition(int indexInRow, int rowCount)
 	{
 		if (rowCount <= 0) return slotCenter;
+		if (rowCount == 5)
+		{
+			if (indexInRow < 3)
+			{
+				float x = (indexInRow - 1) * slotSpacing;
+				return slotCenter + new Vector3(x, 0f, slotRowSpacing * 0.5f);
+			}
+
+			float lowerX = (indexInRow - 3.5f) * slotSpacing;
+			return slotCenter + new Vector3(lowerX, 0f, -slotRowSpacing * 0.5f);
+		}
+
+		float offset = (indexInRow - (rowCount - 1) * 0.5f) * slotSpacing;
+		return slotCenter + Vector3.right * offset;
+	}
+
+	Vector3 GetLineSlotPosition(int indexInRow, int rowCount)
+	{
+		if (rowCount <= 0) return slotCenter;
 		float offset = (indexInRow - (rowCount - 1) * 0.5f) * slotSpacing;
 		return slotCenter + Vector3.right * offset;
 	}
@@ -333,70 +351,115 @@ public class DiceRollDirector : MonoBehaviour
 		RollsRemaining--;
 		HasRolledOnce = true;
 
-		// 원시 결과 → ComboFortune.Apply (파워업 훅) → currentPlan 저장
-		int[] raw = new int[dice.Length];
+		// 물리 굴림 전환:
+		// ComboFortune.Apply / ComboProximity.ComputeStopProfile 기반 사전 보정은 주 롤 경로에서 비활성화.
+		// int[] raw = ... DiceRandomizer.Next();
+		// var plan = ComboFortune.Apply(raw, heldMask, GameSessionManager.PowerUps);
+		// currentProfile = ComboProximity.ComputeStopProfile(...);
+		currentPlan = new int[dice.Length];
 		bool[] heldMask = new bool[dice.Length];
 		for (int i = 0; i < dice.Length; i++)
 		{
 			heldMask[i] = dice[i].IsHeld;
-			raw[i] = heldMask[i] ? dice[i].Result : DiceRandomizer.Next();
+			currentPlan[i] = heldMask[i] ? dice[i].Result : 0;
 		}
-
-		var plan = ComboFortune.Apply(raw, heldMask, GameSessionManager.PowerUps);
-		currentPlan     = plan.values;
 		currentHeldMask = heldMask;
-		if (plan.comboBoosted)
-			Debug.Log($"[DiceRoll] ComboFortune boosted: reason=\"{plan.boostReason}\"");
+		currentProfile = DiceStopProfile.CreateEmpty(dice.Length);
 
-		// 비홀드 주사위만 무한 회전 시작 (멈춤은 유저 입력).
-		// 각 주사위의 spin 기준점(homePosition)을 현재 transform 위치(=이전 sort가 맞춰둔 centered slot)로
-		// 동기화 → BeginSpin이 기준점 위에서 elevation을 더해 그 자리에서 spin 하게 한다.
 		settleCounter = 0;
+		var rollingIndices = new List<int>();
 		for (int i = 0; i < dice.Length; i++)
-		{
-			if (heldMask[i]) continue;
-			Vector3 cur = dice[i].transform.position;
-			dice[i].SetSpinAnchor(new Vector3(cur.x, slotCenter.y, cur.z));
-			dice[i].BeginSpin(currentPlan[i]);
-		}
+			if (!heldMask[i])
+				rollingIndices.Add(i);
 
-		// 멈추기 프로필 사전 계산 — 공격 턴에서만 유효.
-		// 방어 턴은 족보 유도 없이 전체 동시 정지이므로 빈 프로필을 사용한다.
-		if (Mode == TurnMode.Attack)
-		{
-			int preferredRank = ComboFortune.GetPreferredTargetRank(GameSessionManager.PowerUps);
-			currentProfile = ComboProximity.ComputeStopProfile(currentPlan, currentHeldMask, preferredRank);
-		}
-		else
-		{
-			currentProfile = DiceStopProfile.CreateEmpty(dice.Length);
-		}
-
-		Debug.Log($"[DiceRoll] StartRoll mode={Mode} plan=[{string.Join(",", currentPlan)}] " +
-		          $"case={currentProfile.scenario} rank={currentProfile.plannedRank} " +
-		          $"stable={MaskToString(currentProfile.stableMask)} " +
-		          $"decisive={MaskToString(currentProfile.decisiveMask)}");
-
-		// 강조 연출은 stable 4개가 실제로 멈춘 뒤(StopByProfileRoutine 내부)에서 시작.
-		// 여기서는 잔존 상태만 제거.
 		ClearEmphasis();
 
 		Phase = RollPhase.Rolling;
 		ApplyButtonMode(RollPhase.Rolling);
 		holdInteractionEnabled = false;
-		// ※ 회전 중에는 무음. "나와라 송"은 IsComboImminent 플래그 setter에서만 재생.
 
 		OnRollStarted?.Invoke();
+
+		Debug.Log($"[DiceRoll] StartPhysicalRoll mode={Mode} rolling={rollingIndices.Count} held={MaskToString(currentHeldMask)}");
+
+		stopRoutine = StartCoroutine(PhysicalRollRoutine(rollingIndices));
 	}
 
 	void RequestStop()
 	{
-		if (Phase != RollPhase.Rolling) return;
-		Phase = RollPhase.Stopping;
-		ApplyButtonMode(RollPhase.Stopping);
-		stopRoutine = StartCoroutine(Mode == TurnMode.Defense
-			? StopAllAtOnceRoutine()
-			: StopByProfileRoutine(currentProfile));
+		// 물리 굴림은 자동 정착한다. 기존 수동 정지/족보 유도 호출은 비활성화.
+		// stopRoutine = StartCoroutine(Mode == TurnMode.Defense
+		//	? StopAllAtOnceRoutine()
+		//	: StopByProfileRoutine(currentProfile));
+	}
+
+	IEnumerator PhysicalRollRoutine(List<int> rollingIndices)
+	{
+		if (rollingIndices == null || rollingIndices.Count == 0)
+		{
+			FinalizeRoll();
+			yield break;
+		}
+
+		int completed = 0;
+		bool[] completedMask = new bool[dice.Length];
+
+		for (int i = 0; i < rollingIndices.Count; i++)
+			StartCoroutine(PhysicalRollDieRoutine(rollingIndices[i], completedMask, () => completed++));
+
+		while (completed < rollingIndices.Count)
+			yield return null;
+
+		FinalizeRoll();
+	}
+
+	IEnumerator PhysicalRollDieRoutine(int idx, bool[] completedMask, System.Action onCompleted)
+	{
+		if (idx < 0 || idx >= dice.Length || dice[idx] == null)
+		{
+			onCompleted?.Invoke();
+			yield break;
+		}
+
+		Vector3 anchor = new Vector3(dice[idx].transform.position.x, slotCenter.y, dice[idx].transform.position.z);
+		dice[idx].SetSpinAnchor(anchor);
+		dice[idx].BeginPhysicalRoll(Random.rotationUniform);
+
+		while (Phase == RollPhase.Rolling && !completedMask[idx])
+		{
+			bool finished = false;
+			bool valid = false;
+			int face = 0;
+			yield return dice[idx].WaitForValidSettle((ok, value) =>
+			{
+				valid = ok;
+				face = value;
+				finished = true;
+			});
+
+			if (!finished)
+				yield return null;
+
+			if (valid)
+			{
+				dice[idx].FinalizePhysicalRoll(face);
+				if (currentPlan != null && idx < currentPlan.Length)
+					currentPlan[idx] = face;
+				completedMask[idx] = true;
+				onCompleted?.Invoke();
+				yield break;
+			}
+
+			Debug.Log($"[DiceRoll] invalid settle/nudge idx={idx}");
+			dice[idx].NudgeInvalidSettle(anchor);
+			yield return null;
+		}
+
+		if (!completedMask[idx])
+		{
+			dice[idx].ResetForReroll(anchor);
+			onCompleted?.Invoke();
+		}
 	}
 
 	/// <summary>
@@ -542,8 +605,8 @@ public class DiceRollDirector : MonoBehaviour
 		Debug.Log($"[DiceRoll] Settled values=[{string.Join(",", ReadFinalValues())}] rollsRemaining={RollsRemaining}");
 		OnRollSettled?.Invoke();
 
-		// 비홀드 주사위를 slotCenter 중심으로 face 오름차순 centered 정렬 (fire-and-forget)
-		StartCoroutine(SortNonHeldCenteredRoutine());
+		// 굴림 완료 후에는 결과 확인이 쉽도록 가운데 한 줄로 모은다.
+		StartCoroutine(SortNonHeldLineRoutine());
 	}
 
 	IEnumerator WaitUntilSettled(List<int> indices)
@@ -714,8 +777,7 @@ public class DiceRollDirector : MonoBehaviour
 
 	/// <summary>
 	/// 모든 비홀드·정지 상태 주사위를 slotCenter 기준 centered 배치로 face 오름차순 재정렬.
-	/// N=dice.Length → [-2.8,-1.4,0,1.4,2.8]  N=4 → [-2.1,-0.7,0.7,2.1]  N=3 → [-1.4,0,1.4] ...
-	/// 짝수/홀수 개수 모두 slotCenter 기준 대칭 배치. 홀드된 주사위의 원래 자리는 비워두지 않는다.
+	/// 5개는 위 3개/아래 2개, 그 외는 한 줄 대칭 배치. 홀드된 주사위의 원래 자리는 비워두지 않는다.
 	/// FinalizeRoll 직후와 홀드/언홀드 이벤트에서 공통으로 사용.
 	/// 동시에 각 주사위의 spin 기준점도 해당 슬롯(elevation 제외)으로 갱신한다.
 	/// </summary>
@@ -746,6 +808,46 @@ public class DiceRollDirector : MonoBehaviour
 			Vector3 slot = GetSlotPosition(i, sorted.Count);
 			targets[i] = new Vector3(slot.x, elevatedY, slot.z);
 			// spin 기준점 갱신 — 다음 굴림이 이 슬롯에서 시작하도록.
+			dice[sorted[i]].SetSpinAnchor(slot);
+			if ((dice[sorted[i]].transform.position - targets[i]).sqrMagnitude > 0.0001f)
+				allAtTarget = false;
+		}
+		if (allAtTarget) yield break;
+
+		for (int i = 0; i < sorted.Count; i++)
+			dice[sorted[i]].SlideTo(targets[i], sortSlideDuration);
+
+		yield return new WaitForSeconds(sortSlideDuration);
+	}
+
+	/// <summary>
+	/// 굴림 완료 후 결과 주사위를 face 오름차순으로 가운데 한 줄 정렬한다.
+	/// 초기 배치/홀드 재배치의 3+2 그리드와 분리한다.
+	/// </summary>
+	IEnumerator SortNonHeldLineRoutine()
+	{
+		if (dice == null) yield break;
+
+		var indices = new List<int>();
+		for (int i = 0; i < dice.Length; i++)
+		{
+			if (dice[i] == null) continue;
+			if (dice[i].IsHeld) continue;
+			if (dice[i].IsSpinning) continue;
+			indices.Add(i);
+		}
+		if (indices.Count == 0) yield break;
+
+		var sorted = new List<int>(indices);
+		sorted.Sort((a, b) => dice[a].Result.CompareTo(dice[b].Result));
+
+		float elevatedY = dice[sorted[0]].transform.position.y;
+		var targets = new Vector3[sorted.Count];
+		bool allAtTarget = true;
+		for (int i = 0; i < sorted.Count; i++)
+		{
+			Vector3 slot = GetLineSlotPosition(i, sorted.Count);
+			targets[i] = new Vector3(slot.x, elevatedY, slot.z);
 			dice[sorted[i]].SetSpinAnchor(slot);
 			if ((dice[sorted[i]].transform.position - targets[i]).sqrMagnitude > 0.0001f)
 				allAtTarget = false;
@@ -814,8 +916,8 @@ public class DiceRollDirector : MonoBehaviour
 				break;
 			case RollPhase.Rolling:
 				if (rollButtonColorsCached) rollButton.colors = rollButtonDefaultColors;
-				SetLabel("멈추기");
-				rollButton.interactable = true;
+				SetLabel("굴리는 중");
+				rollButton.interactable = false;
 				break;
 			case RollPhase.Stopping:
 			case RollPhase.Finalizing:

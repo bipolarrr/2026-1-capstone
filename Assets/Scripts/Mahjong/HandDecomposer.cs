@@ -156,4 +156,274 @@ namespace Mahjong
 			return $"P{TileIndex.Of(pair)}|{string.Join(",", keys)}";
 		}
 	}
+
+	public readonly struct MahjongTenpaiResult
+	{
+		public readonly bool IsTenpai;
+		public readonly IReadOnlyList<int> WaitTileKinds;
+		public readonly int WaitCount;
+
+		public MahjongTenpaiResult(IReadOnlyList<int> waitTileKinds)
+		{
+			WaitTileKinds = waitTileKinds ?? new List<int>(0);
+			WaitCount = WaitTileKinds.Count;
+			IsTenpai = WaitCount > 0;
+		}
+	}
+
+	public readonly struct MahjongTenpaiDiscardOption
+	{
+		public readonly int DiscardTileKind;
+		public readonly MahjongTenpaiResult AfterDiscard;
+		public readonly bool IsTenpaiAfterDiscard;
+
+		public MahjongTenpaiDiscardOption(int discardTileKind, MahjongTenpaiResult afterDiscard)
+		{
+			DiscardTileKind = discardTileKind;
+			AfterDiscard = afterDiscard;
+			IsTenpaiAfterDiscard = afterDiscard.IsTenpai;
+		}
+	}
+
+	public enum MahjongNeedTileCounterResult
+	{
+		None,
+		Tenpai,
+		Iishanten
+	}
+
+	public static class MahjongTenpaiPolicy
+	{
+		public static MahjongTenpaiResult EvaluateThirteenTiles(
+			IReadOnlyList<Tile> concealedThirteen,
+			IReadOnlyList<Meld> ankans)
+		{
+			int ankanCount = ankans?.Count ?? 0;
+			if (concealedThirteen == null || concealedThirteen.Count != ExpectedThirteenCount(ankanCount))
+				return new MahjongTenpaiResult(new List<int>(0));
+
+			var waits = new List<int>();
+			int[] counts = CountTileKinds(concealedThirteen, ankans);
+			for (int tileKind = 0; tileKind < TileIndex.Count; tileKind++)
+			{
+				if (counts[tileKind] >= 4)
+					continue;
+
+				var fourteen = new List<Tile>(concealedThirteen.Count + 1);
+				for (int i = 0; i < concealedThirteen.Count; i++)
+					fourteen.Add(concealedThirteen[i]);
+
+				Tile candidate = TileIndex.FromIndex(tileKind);
+				fourteen.Add(candidate);
+				var decompositions = HandDecomposer.Enumerate(fourteen, ankans, candidate, tsumo: true);
+				if (decompositions.Count > 0)
+					waits.Add(tileKind);
+			}
+
+			return new MahjongTenpaiResult(waits);
+		}
+
+		public static IReadOnlyList<MahjongTenpaiDiscardOption> EvaluateDiscardOptions(
+			IReadOnlyList<Tile> concealedPlusDrawFourteen,
+			IReadOnlyList<Meld> ankans)
+		{
+			int ankanCount = ankans?.Count ?? 0;
+			if (concealedPlusDrawFourteen == null || concealedPlusDrawFourteen.Count != ExpectedFourteenCount(ankanCount))
+				return new List<MahjongTenpaiDiscardOption>(0);
+
+			var options = new List<MahjongTenpaiDiscardOption>();
+			var seenDiscardKinds = new HashSet<int>();
+			for (int i = 0; i < concealedPlusDrawFourteen.Count; i++)
+			{
+				int discardKind = TileIndex.Of(concealedPlusDrawFourteen[i]);
+				if (!seenDiscardKinds.Add(discardKind))
+					continue;
+
+				var thirteen = new List<Tile>(concealedPlusDrawFourteen.Count - 1);
+				bool removed = false;
+				for (int j = 0; j < concealedPlusDrawFourteen.Count; j++)
+				{
+					if (!removed && TileIndex.Of(concealedPlusDrawFourteen[j]) == discardKind)
+					{
+						removed = true;
+						continue;
+					}
+					thirteen.Add(concealedPlusDrawFourteen[j]);
+				}
+
+				var afterDiscard = EvaluateThirteenTiles(thirteen, ankans);
+				options.Add(new MahjongTenpaiDiscardOption(discardKind, afterDiscard));
+			}
+
+			return options;
+		}
+
+		static int ExpectedThirteenCount(int ankanCount) => 13 - ankanCount * 3;
+		static int ExpectedFourteenCount(int ankanCount) => 14 - ankanCount * 3;
+
+		static int[] CountTileKinds(IReadOnlyList<Tile> concealedTiles, IReadOnlyList<Meld> ankans)
+		{
+			var counts = new int[TileIndex.Count];
+			for (int i = 0; i < concealedTiles.Count; i++)
+				counts[TileIndex.Of(concealedTiles[i])]++;
+
+			if (ankans != null)
+			{
+				foreach (var ankan in ankans)
+				{
+					foreach (var tile in ankan.Tiles)
+						counts[TileIndex.Of(tile)]++;
+				}
+			}
+
+			return counts;
+		}
+	}
+
+	public static class MahjongNeedTileCounterPolicy
+	{
+		public static MahjongNeedTileCounterResult Evaluate(
+			IReadOnlyList<Tile> postDiscardConcealedTiles13,
+			Tile discardedTile,
+			IReadOnlyList<Meld> ankans)
+		{
+			int discardedTileKind = TileIndex.Of(discardedTile);
+			if (discardedTileKind < 0)
+				return MahjongNeedTileCounterResult.None;
+
+			int ankanCount = ankans?.Count ?? 0;
+			if (postDiscardConcealedTiles13 == null
+				|| postDiscardConcealedTiles13.Count != ExpectedThirteenCount(ankanCount))
+			{
+				return MahjongNeedTileCounterResult.None;
+			}
+
+			var tenpai = MahjongTenpaiPolicy.EvaluateThirteenTiles(postDiscardConcealedTiles13, ankans);
+			if (ContainsTileKind(tenpai.WaitTileKinds, discardedTileKind))
+				return MahjongNeedTileCounterResult.Tenpai;
+			if (tenpai.IsTenpai)
+				return MahjongNeedTileCounterResult.None;
+
+			if (CountTileKind(postDiscardConcealedTiles13, ankans, discardedTileKind) >= 4)
+				return MahjongNeedTileCounterResult.None;
+
+			var restoredFourteen = new List<Tile>(postDiscardConcealedTiles13.Count + 1);
+			for (int i = 0; i < postDiscardConcealedTiles13.Count; i++)
+				restoredFourteen.Add(postDiscardConcealedTiles13[i]);
+			restoredFourteen.Add(discardedTile);
+
+			var options = MahjongTenpaiPolicy.EvaluateDiscardOptions(restoredFourteen, ankans);
+			for (int i = 0; i < options.Count; i++)
+			{
+				if (options[i].IsTenpaiAfterDiscard)
+					return MahjongNeedTileCounterResult.Iishanten;
+			}
+			return MahjongNeedTileCounterResult.None;
+		}
+
+		static int ExpectedThirteenCount(int ankanCount) => 13 - ankanCount * 3;
+
+		static bool ContainsTileKind(IReadOnlyList<int> tileKinds, int targetKind)
+		{
+			if (tileKinds == null)
+				return false;
+
+			for (int i = 0; i < tileKinds.Count; i++)
+				if (tileKinds[i] == targetKind)
+					return true;
+			return false;
+		}
+
+		static int CountTileKind(IReadOnlyList<Tile> tiles, IReadOnlyList<Meld> ankans, int targetKind)
+		{
+			int count = 0;
+			for (int i = 0; i < tiles.Count; i++)
+			{
+				if (TileIndex.Of(tiles[i]) == targetKind)
+					count++;
+			}
+
+			if (ankans == null)
+				return count;
+
+			for (int i = 0; i < ankans.Count; i++)
+			{
+				foreach (var tile in ankans[i].Tiles)
+				{
+					if (TileIndex.Of(tile) == targetKind)
+						count++;
+				}
+			}
+			return count;
+		}
+	}
+
+	public enum MahjongRiichiAvailabilityReason
+	{
+		Available,
+		AlreadyDeclared,
+		NoTenpaiDiscard,
+		CannotAct
+	}
+
+	public readonly struct MahjongRiichiAvailability
+	{
+		public readonly bool CanDeclareRiichi;
+		public readonly IReadOnlyList<int> RiichiDiscardTileKinds;
+		public readonly MahjongRiichiAvailabilityReason Reason;
+
+		public MahjongRiichiAvailability(
+			bool canDeclareRiichi,
+			IReadOnlyList<int> riichiDiscardTileKinds,
+			MahjongRiichiAvailabilityReason reason)
+		{
+			CanDeclareRiichi = canDeclareRiichi;
+			RiichiDiscardTileKinds = riichiDiscardTileKinds ?? new List<int>(0);
+			Reason = reason;
+		}
+	}
+
+	public static class MahjongRiichiPolicy
+	{
+		public static MahjongRiichiAvailability Evaluate(
+			IReadOnlyList<MahjongTenpaiDiscardOption> discardOptions,
+			bool alreadyRiichiDeclared,
+			bool canAct = true)
+		{
+			if (alreadyRiichiDeclared)
+				return Unavailable(MahjongRiichiAvailabilityReason.AlreadyDeclared);
+			if (!canAct)
+				return Unavailable(MahjongRiichiAvailabilityReason.CannotAct);
+
+			var riichiDiscardKinds = new List<int>();
+			var seenKinds = new HashSet<int>();
+			if (discardOptions != null)
+			{
+				for (int i = 0; i < discardOptions.Count; i++)
+				{
+					var option = discardOptions[i];
+					if (!option.IsTenpaiAfterDiscard)
+						continue;
+					if (seenKinds.Add(option.DiscardTileKind))
+						riichiDiscardKinds.Add(option.DiscardTileKind);
+				}
+			}
+
+			if (riichiDiscardKinds.Count == 0)
+				return Unavailable(MahjongRiichiAvailabilityReason.NoTenpaiDiscard);
+
+			return new MahjongRiichiAvailability(
+				canDeclareRiichi: true,
+				riichiDiscardTileKinds: riichiDiscardKinds,
+				reason: MahjongRiichiAvailabilityReason.Available);
+		}
+
+		static MahjongRiichiAvailability Unavailable(MahjongRiichiAvailabilityReason reason)
+		{
+			return new MahjongRiichiAvailability(
+				canDeclareRiichi: false,
+				riichiDiscardTileKinds: new List<int>(0),
+				reason: reason);
+		}
+	}
 }

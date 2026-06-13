@@ -15,22 +15,22 @@ public class SettingsPopupController : MonoBehaviour
 	[SerializeField] private TMP_Text bgmValueLabel;
 	[SerializeField] private TMP_Text sfxValueLabel;
 
-	// 실제 오디오 시스템 연결 전까지 값만 보관
-	private float _bgmVolume = 0.8f;
-	private float _sfxVolume = 0.8f;
-
 	void OnEnable()
 	{
+		AudioManager.LoadSettings();
+		float bgmVolume = AudioManager.GetBgmVolume();
+		float sfxVolume = AudioManager.GetSfxVolume();
+
 		// 팝업이 열릴 때마다 현재 값 동기화
 		if (bgmSlider != null)
 		{
-			bgmSlider.SetValueWithoutNotify(_bgmVolume);
-			UpdateBGMLabel(_bgmVolume);
+			bgmSlider.SetValueWithoutNotify(bgmVolume);
+			UpdateBGMLabel(bgmVolume);
 		}
 		if (sfxSlider != null)
 		{
-			sfxSlider.SetValueWithoutNotify(_sfxVolume);
-			UpdateSFXLabel(_sfxVolume);
+			sfxSlider.SetValueWithoutNotify(sfxVolume);
+			UpdateSFXLabel(sfxVolume);
 		}
 	}
 
@@ -44,18 +44,16 @@ public class SettingsPopupController : MonoBehaviour
 
 	public void OnBGMChanged(float value)
 	{
-		_bgmVolume = value;
+		AudioManager.SetBgmVolume(value);
 		UpdateBGMLabel(value);
 		Debug.Log($"[Settings] BGM 변경: {value:P0}");
-		// TODO: AudioManager 구현 후 연결
 	}
 
 	public void OnSFXChanged(float value)
 	{
-		_sfxVolume = value;
+		AudioManager.SetSfxVolume(value);
 		UpdateSFXLabel(value);
 		Debug.Log($"[Settings] SFX 변경: {value:P0}");
-		// TODO: AudioManager 구현 후 연결
 	}
 
 	private void UpdateBGMLabel(float v)

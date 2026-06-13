@@ -85,6 +85,35 @@ public static class DicePrefabBuilder
 		Debug.Log($"[DicePrefabBuilder] Built prefab: {PrefabPath}");
 	}
 
+	public static bool TryRegenerateFaceSpritesFromSource()
+	{
+		if (!File.Exists(SourceTexturePath))
+		{
+			Debug.LogWarning($"[DicePrefabBuilder] Source texture not found: {SourceTexturePath}");
+			return false;
+		}
+
+		EnsureDirectory(GeneratedFolder);
+		EnsureDirectory(FaceSpriteFolder);
+		ConfigureTextureImporter(SourceTexturePath);
+
+		var texture = AssetDatabase.LoadAssetAtPath<Texture2D>(SourceTexturePath);
+		if (texture == null)
+		{
+			Debug.LogWarning($"[DicePrefabBuilder] Failed to load texture: {SourceTexturePath}");
+			return false;
+		}
+
+		var faceRects = BuildFaceRects(texture);
+		var atlas = BuildCleanAtlas(texture, faceRects);
+		WriteAtlas(atlas, AtlasPath);
+		ConfigureTextureImporter(AtlasPath);
+		WriteFaceSprites(atlas);
+		Object.DestroyImmediate(atlas);
+		AssetDatabase.SaveAssets();
+		return true;
+	}
+
 	static Mesh CreateD6Mesh(Texture2D texture)
 	{
 		var vertices = new Vector3[24];
@@ -94,17 +123,17 @@ public static class DicePrefabBuilder
 		int vertex = 0;
 		int triangle = 0;
 
-		AddFace(1, Vector3.forward, Vector3.right, Vector3.up,
+		AddResolvedFace(1, Vector3.right, Vector3.up,
 			ref vertex, ref triangle, vertices, normals, uvs, triangles, texture);
-		AddFace(2, Vector3.up, Vector3.right, Vector3.forward,
+		AddResolvedFace(2, Vector3.right, Vector3.forward,
 			ref vertex, ref triangle, vertices, normals, uvs, triangles, texture);
-		AddFace(3, Vector3.left, Vector3.forward, Vector3.up,
+		AddResolvedFace(3, Vector3.forward, Vector3.up,
 			ref vertex, ref triangle, vertices, normals, uvs, triangles, texture);
-		AddFace(4, Vector3.right, Vector3.back, Vector3.up,
+		AddResolvedFace(4, Vector3.back, Vector3.up,
 			ref vertex, ref triangle, vertices, normals, uvs, triangles, texture);
-		AddFace(5, Vector3.down, Vector3.right, Vector3.back,
+		AddResolvedFace(5, Vector3.right, Vector3.back,
 			ref vertex, ref triangle, vertices, normals, uvs, triangles, texture);
-		AddFace(6, Vector3.back, Vector3.left, Vector3.up,
+		AddResolvedFace(6, Vector3.left, Vector3.up,
 			ref vertex, ref triangle, vertices, normals, uvs, triangles, texture);
 
 		var mesh = new Mesh
@@ -116,6 +145,20 @@ public static class DicePrefabBuilder
 		};
 		mesh.RecalculateBounds();
 		return mesh;
+	}
+
+	static void AddResolvedFace(int faceValue, Vector3 axisU, Vector3 axisV,
+		ref int vertex, ref int triangle,
+		Vector3[] vertices, Vector3[] normals, Vector2[] uvs, int[] triangles, Texture2D texture)
+	{
+		if (!DiceFaceResolver.TryGetLocalNormalForFace(faceValue, out Vector3 normal))
+		{
+			Debug.LogWarning($"[DicePrefabBuilder] Face normal not found: {faceValue}");
+			normal = Vector3.up;
+		}
+
+		AddFace(faceValue, normal, axisU, axisV,
+			ref vertex, ref triangle, vertices, normals, uvs, triangles, texture);
 	}
 
 	static void AddFace(int faceValue, Vector3 normal, Vector3 axisU, Vector3 axisV,
@@ -308,9 +351,19 @@ public static class DicePrefabBuilder
 			return;
 
 		bool changed = false;
-		if (importer.textureType != TextureImporterType.Sprite)
+		if (importer.textureType != TextureImporterType.Sprite ||
+		    importer.spriteImportMode != SpriteImportMode.Single)
 		{
 			importer.textureType = TextureImporterType.Sprite;
+			importer.spriteImportMode = SpriteImportMode.Single;
+			changed = true;
+		}
+		var settings = new TextureImporterSettings();
+		importer.ReadTextureSettings(settings);
+		if (settings.spriteMeshType != SpriteMeshType.FullRect)
+		{
+			settings.spriteMeshType = SpriteMeshType.FullRect;
+			importer.SetTextureSettings(settings);
 			changed = true;
 		}
 		if (importer.spritePixelsPerUnit != 100f)

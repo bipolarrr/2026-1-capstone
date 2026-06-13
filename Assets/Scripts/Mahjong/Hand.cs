@@ -56,7 +56,7 @@ namespace Mahjong
 			ankans.Clear();
 			draw = null;
 			foreach (var t in tiles) closed.Add(t);
-			closed.Sort();
+			TileOrdering.Sort(closed);
 		}
 
 		public void SetDraw(Tile tile)
@@ -77,7 +77,7 @@ namespace Mahjong
 			if (draw.HasValue)
 			{
 				closed.Add(draw.Value);
-				closed.Sort();
+				TileOrdering.Sort(closed);
 				draw = null;
 			}
 			return true;
@@ -104,6 +104,9 @@ namespace Mahjong
 
 		public bool DeclareAnkan(Tile kind)
 		{
+			if (!CanDeclareAnkan(kind))
+				return false;
+
 			int removed = 0;
 			for (int i = closed.Count - 1; i >= 0 && removed < 4; i--)
 			{
@@ -119,12 +122,23 @@ namespace Mahjong
 			return true;
 		}
 
+		public bool CanDeclareAnkan(Tile kind)
+		{
+			int count = 0;
+			foreach (var t in closed)
+				if (t.SameKind(kind))
+					count++;
+			if (draw.HasValue && draw.Value.SameKind(kind))
+				count++;
+			return count == 4;
+		}
+
 		/// <summary>화료 평가용 14장(닫힌 + 쯔모 + 안깡 풀어서 면자 처리는 평가기에서).</summary>
 		public List<Tile> ConcealedFourteen()
 		{
 			var list = new List<Tile>(closed);
 			if (draw.HasValue) list.Add(draw.Value);
-			list.Sort();
+			TileOrdering.Sort(list);
 			return list;
 		}
 	}

@@ -11,6 +11,7 @@ using TMPro;
 /// </summary>
 public class UIHoverEffect : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
 {
+	[SerializeField] Transform animatedTarget;
 	[SerializeField] TMP_Text targetText;
 	[SerializeField] Image targetImage;
 	[SerializeField] float fontSizeBoost = 4f;
@@ -33,7 +34,7 @@ public class UIHoverEffect : MonoBehaviour, IPointerEnterHandler, IPointerExitHa
 
 	void Awake()
 	{
-		originalScale = transform.localScale;
+		originalScale = GetAnimatedTarget().localScale;
 		useTextColor = normalColor.a > 0f || hoverColor.a > 0f;
 
 		if (targetText != null)
@@ -72,8 +73,14 @@ public class UIHoverEffect : MonoBehaviour, IPointerEnterHandler, IPointerExitHa
 		transition = StartCoroutine(LerpTransition(hovered));
 	}
 
+	Transform GetAnimatedTarget()
+	{
+		return animatedTarget != null ? animatedTarget : transform;
+	}
+
 	IEnumerator LerpTransition(bool hovered)
 	{
+		var scaleTarget = GetAnimatedTarget();
 		float targetFontSize = hovered ? originalFontSize + fontSizeBoost : originalFontSize;
 		Vector3 targetScale = hovered ? originalScale * scaleFactor : originalScale;
 		Color targetOutline = hovered ? outlineColor : Color.clear;
@@ -81,7 +88,7 @@ public class UIHoverEffect : MonoBehaviour, IPointerEnterHandler, IPointerExitHa
 		Color targetTextColor = hovered ? hoverColor : normalColor;
 
 		float startFontSize = targetText != null ? targetText.fontSize : 0f;
-		Vector3 startScale = transform.localScale;
+		Vector3 startScale = scaleTarget.localScale;
 		Color startOutline = outline != null ? outline.effectColor : Color.clear;
 		Color startShadow = shadow != null ? shadow.effectColor : Color.clear;
 		Color startTextColor = (useTextColor && targetText != null) ? targetText.color : Color.clear;
@@ -92,7 +99,7 @@ public class UIHoverEffect : MonoBehaviour, IPointerEnterHandler, IPointerExitHa
 			elapsed += Time.unscaledDeltaTime;
 			float t = Mathf.SmoothStep(0f, 1f, elapsed / transitionDuration);
 
-			transform.localScale = Vector3.Lerp(startScale, targetScale, t);
+			scaleTarget.localScale = Vector3.Lerp(startScale, targetScale, t);
 
 			if (targetText != null)
 			{
@@ -110,7 +117,7 @@ public class UIHoverEffect : MonoBehaviour, IPointerEnterHandler, IPointerExitHa
 			yield return null;
 		}
 
-		transform.localScale = targetScale;
+		scaleTarget.localScale = targetScale;
 
 		if (targetText != null)
 		{

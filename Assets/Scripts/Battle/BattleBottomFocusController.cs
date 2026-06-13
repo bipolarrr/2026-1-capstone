@@ -22,11 +22,14 @@ public sealed class BattleBottomFocusController : MonoBehaviour
 
 	readonly Queue<string> messageQueue = new Queue<string>();
 	bool historyOpen;
+	int currentMessagePage = 1;
+	int currentMessagePageCount = 1;
 
 	void Awake()
 	{
+		ConfigurePagedMessageText();
 		if (battleLog != null)
-			battleLog.EntryAdded += QueueMessage;
+			battleLog.EntryAdded += HandleEntryAdded;
 		if (messageAdvanceButton != null)
 			messageAdvanceButton.onClick.AddListener(AdvanceMessage);
 		if (logButton != null)
@@ -41,17 +44,17 @@ public sealed class BattleBottomFocusController : MonoBehaviour
 	void OnDestroy()
 	{
 		if (battleLog != null)
-			battleLog.EntryAdded -= QueueMessage;
+			battleLog.EntryAdded -= HandleEntryAdded;
 	}
 
 	public void Bind(BattleLog log)
 	{
 		if (battleLog == log) return;
 		if (battleLog != null)
-			battleLog.EntryAdded -= QueueMessage;
+			battleLog.EntryAdded -= HandleEntryAdded;
 		battleLog = log;
 		if (battleLog != null)
-			battleLog.EntryAdded += QueueMessage;
+			battleLog.EntryAdded += HandleEntryAdded;
 	}
 
 	public void ShowInput()
@@ -61,12 +64,14 @@ public sealed class BattleBottomFocusController : MonoBehaviour
 		SetGroup(inputGroup, true, true);
 	}
 
-	public void QueueMessage(string message)
+	void HandleEntryAdded(BattleLogEntry entry)
 	{
-		if (string.IsNullOrEmpty(message)) return;
+		if (string.IsNullOrEmpty(entry.Message)) return;
 		if (historyOpen && historyText != null)
 			historyText.text = battleLog != null ? battleLog.BuildHistoryText() : "";
-		messageQueue.Enqueue(message);
+		if (entry.Presentation != BattleEventPresentation.LogAndPopup)
+			return;
+		messageQueue.Enqueue(entry.Message);
 		if (!historyOpen && !IsGroupVisible(messageGroup))
 			ShowNextMessage();
 	}
@@ -75,13 +80,14 @@ public sealed class BattleBottomFocusController : MonoBehaviour
 	{
 		if (messageQueue.Count == 0)
 		{
+			currentMessagePage = 1;
+			currentMessagePageCount = 1;
 			SetGroup(messageGroup, false, false);
 			SetGroup(inputGroup, true, true);
 			return;
 		}
 
-		if (messageText != null)
-			messageText.text = messageQueue.Dequeue();
+		SetMessageText(messageQueue.Dequeue());
 		SetGroup(inputGroup, true, false);
 		SetGroup(messageGroup, true, true);
 	}
@@ -89,6 +95,13 @@ public sealed class BattleBottomFocusController : MonoBehaviour
 	void AdvanceMessage()
 	{
 		if (historyOpen) return;
+		if (currentMessagePage < currentMessagePageCount)
+		{
+			currentMessagePage++;
+			if (messageText != null)
+				messageText.pageToDisplay = currentMessagePage;
+			return;
+		}
 		ShowNextMessage();
 	}
 
@@ -120,6 +133,28 @@ public sealed class BattleBottomFocusController : MonoBehaviour
 	static bool IsGroupVisible(CanvasGroup group)
 	{
 		return group != null && group.alpha > 0.5f;
+	}
+
+	void ConfigurePagedMessageText()
+	{
+		if (messageText == null) return;
+		messageText.alignment = TextAlignmentOptions.MidlineLeft;
+		messageText.overflowMode = TextOverflowModes.Page;
+		messageText.maxVisibleLines = 5;
+		messageText.pageToDisplay = 1;
+	}
+
+	void SetMessageText(string message)
+	{
+		currentMessagePage = 1;
+		currentMessagePageCount = 1;
+		if (messageText == null) return;
+
+		ConfigurePagedMessageText();
+		messageText.text = message;
+		messageText.pageToDisplay = currentMessagePage;
+		messageText.ForceMeshUpdate();
+		currentMessagePageCount = Mathf.Max(1, messageText.textInfo.pageCount);
 	}
 
 	static void SetGroup(CanvasGroup group, bool visible, bool interactive)

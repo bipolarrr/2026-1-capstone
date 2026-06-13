@@ -32,9 +32,11 @@ namespace Mahjong
 			Data = tile;
 			onClick = clickHandler;
 			ApplyVisual(tile);
-			if (redMarker != null) redMarker.gameObject.SetActive(tile.IsRedFive);
+			if (redMarker != null)
+				redMarker.gameObject.SetActive(tile.IsRedFive && !HasDedicatedRedFiveSprite(tile));
 			// 클릭 가능한 타일(손패/쯔모)만 호버 lift 활성. 버림패/도라/미리보기는 비활성.
 			if (hoverEffect != null) hoverEffect.enabled = (clickHandler != null);
+			if (hoverEffect != null) hoverEffect.ClearReadabilityHint();
 			// 툴팁은 컨트롤러가 트리거 시점에 활성화.
 			if (discardTooltip != null) discardTooltip.enabled = false;
 			if (skullOverlay != null) skullOverlay.SetActive(false);
@@ -45,20 +47,32 @@ namespace Mahjong
 			if (skullOverlay != null) skullOverlay.SetActive(true);
 		}
 
+		public void SetReadabilityHint(string hintText, Color tint, Color borderColor, bool showPersistentBorder)
+		{
+			if (background != null)
+				background.color = tint;
+			if (hoverEffect != null)
+				hoverEffect.SetReadabilityHint(hintText, borderColor, showPersistentBorder);
+		}
+
+		public void SetReadabilityHintText(string hintText, Color borderColor, bool showPersistentBorder)
+		{
+			if (hoverEffect != null)
+				hoverEffect.SetReadabilityHint(hintText, borderColor, showPersistentBorder);
+		}
+
+		public void ClearReadabilityHint()
+		{
+			ApplyVisual(Data);
+			if (hoverEffect != null)
+				hoverEffect.ClearReadabilityHint();
+		}
+
 		void ApplyVisual(Tile tile)
 		{
 			if (background == null) return;
 
-			Sprite suitSprite = null;
-			if (spriteDb != null)
-			{
-				switch (tile.Suit)
-				{
-					case Suit.Man: suitSprite = spriteDb.GetMan(tile.Value); break;
-					case Suit.Pin: suitSprite = spriteDb.GetPin(tile.Value); break;
-					case Suit.Sou: suitSprite = spriteDb.GetSou(tile.Value); break;
-				}
-			}
+			Sprite suitSprite = spriteDb != null ? spriteDb.GetSprite(tile) : null;
 
 			if (suitSprite != null)
 			{
@@ -85,6 +99,11 @@ namespace Mahjong
 				}
 				if (label != null) label.text = LabelFor(tile);
 			}
+		}
+
+		bool HasDedicatedRedFiveSprite(Tile tile)
+		{
+			return spriteDb != null && spriteDb.HasDedicatedRedFiveSprite(tile);
 		}
 
 		public void OnPointerClick(PointerEventData eventData)

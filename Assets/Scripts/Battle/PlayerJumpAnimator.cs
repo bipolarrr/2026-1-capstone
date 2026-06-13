@@ -11,7 +11,6 @@ public class PlayerJumpAnimator : MonoBehaviour
 	[SerializeField] Image playerBody;
 	[SerializeField] Image belowEffect;
 	[SerializeField] PlayerBodyAnimator bodyAnimator;
-	[SerializeField] Sprite[] jumpSprites;
 	[SerializeField] Sprite[] belowSprites;
 
 	// QuickSlam = 0.06(돌진) + 0.04(멈춤) + 0.1(복귀) = 0.2초.
@@ -25,7 +24,7 @@ public class PlayerJumpAnimator : MonoBehaviour
 
 	public void Play()
 	{
-		if (playerBody == null || jumpSprites == null || jumpSprites.Length == 0)
+		if (playerBody == null)
 			return;
 
 		if (currentAnim != null)
@@ -39,8 +38,7 @@ public class PlayerJumpAnimator : MonoBehaviour
 
 	IEnumerator PlaySequence()
 	{
-		if (bodyAnimator != null)
-			bodyAnimator.PauseAuto();
+		bodyAnimator?.PlayJump(jumpDuration);
 
 		if (belowEffect != null)
 			belowEffect.enabled = true;
@@ -48,7 +46,6 @@ public class PlayerJumpAnimator : MonoBehaviour
 		RectTransform bodyRt = playerBody.rectTransform;
 		Vector2 originalPos = bodyRt.anchoredPosition;
 
-		int bodyLen = jumpSprites.Length;
 		int belowLen = belowSprites?.Length ?? 0;
 
 		float elapsed = 0f;
@@ -56,11 +53,6 @@ public class PlayerJumpAnimator : MonoBehaviour
 		{
 			elapsed += Time.deltaTime;
 			float t = Mathf.Clamp01(elapsed / jumpDuration);
-
-			// 스프라이트 시퀀스 — 시간 t(0~1)로 프레임 인덱스 매핑
-			int bodyIdx = Mathf.Clamp(Mathf.FloorToInt(t * bodyLen), 0, bodyLen - 1);
-			if (jumpSprites[bodyIdx] != null)
-				playerBody.sprite = jumpSprites[bodyIdx];
 
 			if (belowEffect != null && belowLen > 0)
 			{
@@ -83,9 +75,6 @@ public class PlayerJumpAnimator : MonoBehaviour
 			belowEffect.enabled = false;
 			belowEffect.sprite = null;
 		}
-
-		if (bodyAnimator != null)
-			bodyAnimator.ResumeAuto();
 
 		currentAnim = null;
 	}

@@ -16,7 +16,10 @@ public class DebugConsoleController : MonoBehaviour
 	TMP_Text logText;
 	bool isOpen;
 	readonly List<string> logLines = new List<string>();
+	readonly List<string> commandHistory = new List<string>();
 	const int MaxLogLines = 30;
+	const int MaxCommandHistory = 50;
+	int historyCursor = -1;
 
 	// 코나미 커맨드: ↑↑↓↓←→←→BA
 	static readonly Key[] KonamiSequence =
@@ -47,11 +50,28 @@ public class DebugConsoleController : MonoBehaviour
 			return;
 		}
 
-		// 콘솔 열려 있을 때 InputField가 포커스 중이면 시퀀스 감지 건너뜀
 		if (isOpen)
+		{
+			UpdateCommandHistoryInput(kb);
 			return;
+		}
 
 		UpdateKonamiSequence(kb);
+	}
+
+	void UpdateCommandHistoryInput(Keyboard kb)
+	{
+		if (inputField == null)
+			return;
+
+		if (kb.upArrowKey.wasPressedThisFrame)
+		{
+			MoveHistory(-1);
+			return;
+		}
+
+		if (kb.downArrowKey.wasPressedThisFrame)
+			MoveHistory(1);
 	}
 
 	void UpdateKonamiSequence(Keyboard kb)
@@ -91,6 +111,7 @@ public class DebugConsoleController : MonoBehaviour
 		if (open)
 		{
 			inputField.text = "";
+			historyCursor = commandHistory.Count;
 			StartCoroutine(FocusInputField());
 		}
 		else
@@ -111,13 +132,50 @@ public class DebugConsoleController : MonoBehaviour
 		if (string.IsNullOrWhiteSpace(text))
 			return;
 
+		AddCommandHistory(text.Trim());
 		AppendLog($"> {text}");
 		string result = DebugCommandProcessor.Execute(text);
 		if (!string.IsNullOrEmpty(result))
 			AppendLog(result);
 
 		inputField.text = "";
+		historyCursor = commandHistory.Count;
 		StartCoroutine(FocusInputField());
+	}
+
+	void AddCommandHistory(string command)
+	{
+		if (string.IsNullOrWhiteSpace(command))
+			return;
+
+		if (commandHistory.Count > 0 && commandHistory[commandHistory.Count - 1] == command)
+			return;
+
+		commandHistory.Add(command);
+		while (commandHistory.Count > MaxCommandHistory)
+			commandHistory.RemoveAt(0);
+	}
+
+	void MoveHistory(int delta)
+	{
+		if (commandHistory.Count == 0)
+			return;
+
+		if (historyCursor < 0 || historyCursor > commandHistory.Count)
+			historyCursor = commandHistory.Count;
+
+		historyCursor = Mathf.Clamp(historyCursor + delta, 0, commandHistory.Count);
+		string value = historyCursor < commandHistory.Count ? commandHistory[historyCursor] : "";
+		SetInputText(value);
+	}
+
+	void SetInputText(string value)
+	{
+		inputField.text = value;
+		inputField.caretPosition = inputField.text.Length;
+		inputField.stringPosition = inputField.text.Length;
+		inputField.ActivateInputField();
+		inputField.Select();
 	}
 
 	void AppendLog(string msg)
@@ -144,17 +202,18 @@ public class DebugConsoleController : MonoBehaviour
 		scaler.matchWidthOrHeight = 0.5f;
 		canvasGo.AddComponent<GraphicRaycaster>();
 
-		// 패널 (화면 중앙, 720x480)
+		// 패널 (상단 중앙, 기존 480 높이의 1/3)
 		panel = new GameObject("DebugPanel");
 		panel.transform.SetParent(canvasGo.transform, false);
 		var panelImg = panel.AddComponent<Image>();
 		panelImg.color = new Color(0.05f, 0.05f, 0.12f, 0.92f);
 		panelImg.raycastTarget = true;
 		var panelRt = panel.GetComponent<RectTransform>();
-		panelRt.anchorMin = new Vector2(0.5f, 0.5f);
-		panelRt.anchorMax = new Vector2(0.5f, 0.5f);
-		panelRt.pivot = new Vector2(0.5f, 0.5f);
-		panelRt.sizeDelta = new Vector2(720, 480);
+		panelRt.anchorMin = new Vector2(0.5f, 1f);
+		panelRt.anchorMax = new Vector2(0.5f, 1f);
+		panelRt.pivot = new Vector2(0.5f, 1f);
+		panelRt.sizeDelta = new Vector2(720, 160);
+		panelRt.anchoredPosition = new Vector2(0f, -20f);
 
 		BuildTitle();
 		BuildLogArea();
@@ -167,7 +226,7 @@ public class DebugConsoleController : MonoBehaviour
 		go.transform.SetParent(panel.transform, false);
 		var tmp = go.AddComponent<TextMeshProUGUI>();
 		tmp.text = "Debug Console  (↑↑↓↓←→←→BA / Esc)";
-		tmp.fontSize = 22;
+		tmp.fontSize = 18;
 		tmp.color = new Color(0.8f, 0.8f, 1f);
 		tmp.alignment = TextAlignmentOptions.Center;
 		tmp.fontStyle = FontStyles.Bold;
@@ -177,7 +236,7 @@ public class DebugConsoleController : MonoBehaviour
 		rt.anchorMin = new Vector2(0f, 1f);
 		rt.anchorMax = new Vector2(1f, 1f);
 		rt.pivot = new Vector2(0.5f, 1f);
-		rt.sizeDelta = new Vector2(0f, 36f);
+		rt.sizeDelta = new Vector2(0f, 26f);
 		rt.anchoredPosition = Vector2.zero;
 	}
 
@@ -189,8 +248,8 @@ public class DebugConsoleController : MonoBehaviour
 		bgImg.color = new Color(0.02f, 0.02f, 0.06f, 0.95f);
 		bgImg.raycastTarget = false;
 		var bgRt = bg.GetComponent<RectTransform>();
-		bgRt.anchorMin = new Vector2(0.02f, 0.13f);
-		bgRt.anchorMax = new Vector2(0.98f, 0.92f);
+		bgRt.anchorMin = new Vector2(0.02f, 0.25f);
+		bgRt.anchorMax = new Vector2(0.98f, 0.82f);
 		bgRt.offsetMin = Vector2.zero;
 		bgRt.offsetMax = Vector2.zero;
 
@@ -200,7 +259,7 @@ public class DebugConsoleController : MonoBehaviour
 		logGo.transform.SetParent(bg.transform, false);
 		logText = logGo.AddComponent<TextMeshProUGUI>();
 		logText.text = "";
-		logText.fontSize = 18;
+		logText.fontSize = 14;
 		logText.color = new Color(0.75f, 0.95f, 0.75f);
 		logText.alignment = TextAlignmentOptions.BottomLeft;
 		logText.textWrappingMode = TextWrappingModes.Normal;
@@ -220,8 +279,8 @@ public class DebugConsoleController : MonoBehaviour
 		var bgImg = go.AddComponent<Image>();
 		bgImg.color = new Color(0.10f, 0.10f, 0.18f, 1f);
 		var goRt = go.GetComponent<RectTransform>();
-		goRt.anchorMin = new Vector2(0.02f, 0.02f);
-		goRt.anchorMax = new Vector2(0.98f, 0.11f);
+		goRt.anchorMin = new Vector2(0.02f, 0.04f);
+		goRt.anchorMax = new Vector2(0.98f, 0.20f);
 		goRt.offsetMin = Vector2.zero;
 		goRt.offsetMax = Vector2.zero;
 
@@ -241,7 +300,7 @@ public class DebugConsoleController : MonoBehaviour
 		phGo.transform.SetParent(textArea.transform, false);
 		var placeholder = phGo.AddComponent<TextMeshProUGUI>();
 		placeholder.text = "명령 입력... (/help)";
-		placeholder.fontSize = 20;
+		placeholder.fontSize = 16;
 		placeholder.color = new Color(0.5f, 0.5f, 0.6f, 0.7f);
 		placeholder.alignment = TextAlignmentOptions.Left;
 		placeholder.textWrappingMode = TextWrappingModes.NoWrap;
@@ -257,7 +316,7 @@ public class DebugConsoleController : MonoBehaviour
 		txtGo.transform.SetParent(textArea.transform, false);
 		var textComp = txtGo.AddComponent<TextMeshProUGUI>();
 		textComp.text = "";
-		textComp.fontSize = 20;
+		textComp.fontSize = 16;
 		textComp.color = Color.white;
 		textComp.alignment = TextAlignmentOptions.Left;
 		textComp.textWrappingMode = TextWrappingModes.NoWrap;

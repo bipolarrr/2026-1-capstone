@@ -37,12 +37,16 @@ public class BattleDamageVFX : MonoBehaviour
 		rt.sizeDelta = new Vector2(200, 50);
 
 		float xOffset = Random.Range(-30f, 30f);
-		if (enemyIdx < enemyPanels.Length && enemyPanels[enemyIdx].activeSelf)
+		if (enemyPanels != null && enemyIdx >= 0 && enemyIdx < enemyPanels.Length
+			&& enemyPanels[enemyIdx] != null && enemyPanels[enemyIdx].activeSelf)
 		{
 			RectTransform panelRt = enemyPanels[enemyIdx].GetComponent<RectTransform>();
-			Vector3 worldCenter = panelRt.TransformPoint(Vector3.zero);
-			Vector3 localInSpawn = damageSpawnParent.InverseTransformPoint(worldCenter);
-			rt.anchoredPosition = new Vector2(localInSpawn.x + xOffset, 0);
+			RectTransform bodyRt = ResolveEnemyBodyRect(panelRt);
+			Vector3 worldAnchor = bodyRt != null
+				? EnemyVisualBoundsResolver.ResolveWorldPoint(bodyRt, 0.5f, 0.72f, panelRt.position)
+				: panelRt.position;
+			Vector3 localInSpawn = damageSpawnParent.InverseTransformPoint(worldAnchor);
+			rt.anchoredPosition = new Vector2(localInSpawn.x + xOffset, localInSpawn.y);
 		}
 		else
 		{
@@ -50,6 +54,14 @@ public class BattleDamageVFX : MonoBehaviour
 		}
 
 		StartCoroutine(FloatDamageText(go, txt));
+	}
+
+	static RectTransform ResolveEnemyBodyRect(RectTransform panelRt)
+	{
+		if (panelRt == null)
+			return null;
+		var body = panelRt.Find("Body") as RectTransform;
+		return body != null ? body : panelRt;
 	}
 
 	public void Shake(float intensity)

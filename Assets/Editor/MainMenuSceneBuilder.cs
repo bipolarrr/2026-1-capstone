@@ -2,63 +2,50 @@
 // Unity 메뉴 → Tools → Build MainMenu Scene 으로 씬을 자동 생성합니다.
 // 씬이 이미 존재하면 덮어쓸지 물어봅니다.
 
+using System;
 using System.IO;
 using UnityEditor;
 using UnityEditor.Events;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.UI;
-using UnityEngine.EventSystems;
-using UnityEngine.InputSystem.UI;
 using TMPro;
 using SBU = SceneBuilderUtility;
 
 public static class MainMenuSceneBuilder
 {
 	private const string ScenePath = "Assets/Scenes/MainMenu.unity";
+	private const string MainScreenLogoPath = "Assets/UI/MainScreen_Logo.png";
 
 	[MenuItem("Tools/Build MainMenu Scene")]
 	public static void Build()
 	{
-		if (File.Exists(ScenePath))
+		BuildInternal(confirmOverwrite: true, showCompletionDialog: true);
+	}
+
+	public static bool BuildForIncremental()
+	{
+		return BuildInternal(confirmOverwrite: false, showCompletionDialog: false);
+	}
+
+	static bool BuildInternal(bool confirmOverwrite, bool showCompletionDialog)
+	{
+		if (confirmOverwrite && File.Exists(ScenePath))
 		{
 			bool overwrite = EditorUtility.DisplayDialog(
 				"MainMenu 씬 생성",
 				$"{ScenePath} 가 이미 존재합니다. 덮어쓰시겠습니까?",
 				"덮어쓰기", "취소");
 			if (!overwrite)
-				return;
+				return false;
 		}
 
+		SBU.BeginSceneBuildValidation(nameof(MainMenuSceneBuilder));
 		var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
-		// ── 카메라 ──────────────────────────────────────────────────
-		var camera = new GameObject("MainCamera");
-		camera.tag = "MainCamera";
-		var cameraComponent = camera.AddComponent<Camera>();
-		cameraComponent.clearFlags = CameraClearFlags.SolidColor;
-		cameraComponent.backgroundColor = Color.black;
-		cameraComponent.orthographic = true;
-		cameraComponent.orthographicSize = 5f;
-		camera.transform.position = new Vector3(0, 0, -10);
-		camera.AddComponent<AudioListener>();
-
-		// ── Canvas ──────────────────────────────────────────────────
-		var canvasObject = new GameObject("Canvas");
-		var canvas = canvasObject.AddComponent<Canvas>();
-		canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-
-		var scaler = canvasObject.AddComponent<CanvasScaler>();
-		scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-		scaler.referenceResolution = new Vector2(1920, 1080);
-		scaler.matchWidthOrHeight = 0.5f;
-
-		canvasObject.AddComponent<GraphicRaycaster>();
-
-		// ── EventSystem ──────────────────────────────────────────────
-		var eventSystem = new GameObject("EventSystem");
-		eventSystem.AddComponent<EventSystem>();
-		eventSystem.AddComponent<InputSystemUIInputModule>();
+		var shell = SBU.BuildSceneShell("MainCamera", Color.black,
+			cameraPosition: new Vector3(0, 0, -10), includeAudioListener: true);
+		var canvasObject = shell.canvas.gameObject;
 
 		// ── MenuRoot (MainMenuController + ButtonHandler 붙이는 곳) ──
 		var menuRoot = new GameObject("MenuRoot");
@@ -73,9 +60,9 @@ public static class MainMenuSceneBuilder
 		logoGroupRect.offsetMax = Vector2.zero;
 		var logoCanvasGroup = logoGroup.AddComponent<CanvasGroup>();
 
-		var logoSprite = AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Mobs/MainScreen_logo.png");
+		var logoSprite = LoadMainScreenLogoSprite();
 		if (logoSprite == null)
-			Debug.LogWarning("[MainMenuSceneBuilder] 메인화면 스프라이트를 찾을 수 없습니다: Assets/Mobs/MainScreen_logo.png");
+			Debug.LogWarning($"[MainMenuSceneBuilder] 메인화면 스프라이트를 찾을 수 없습니다: {MainScreenLogoPath}");
 		var logoImage = new GameObject("BackgroundImage");
 		var logoImageRect = logoImage.AddComponent<RectTransform>();
 		logoImageRect.SetParent(logoGroup.transform, false);
@@ -110,11 +97,11 @@ public static class MainMenuSceneBuilder
 		// ── SettingsPopup ────────────────────────────────────────────
 		var settingsDimmer = SBU.CreateDimmer(canvasObject.transform, "SettingsDimmer");
 		var settingsPopup = BuildSettingsPopup(canvasObject.transform);
-		SetPrivateField(settingsPopup.GetComponent<SimplePopup>(), "dimmer", settingsDimmer.GetComponent<Image>());
+		SBU.SetField(settingsPopup.GetComponent<SimplePopup>(), "dimmer", settingsDimmer.GetComponent<Image>());
 		// ── CreditsPopup ─────────────────────────────────────────────
 		var creditsDimmer = SBU.CreateDimmer(canvasObject.transform, "CreditsDimmer");
 		var creditsPopup = BuildCreditsPopup(canvasObject.transform);
-		SetPrivateField(creditsPopup.GetComponent<SimplePopup>(), "dimmer", creditsDimmer.GetComponent<Image>());
+		SBU.SetField(creditsPopup.GetComponent<SimplePopup>(), "dimmer", creditsDimmer.GetComponent<Image>());
 
 		// ── MenuRoot에 컴포넌트 붙이기 ───────────────────────────────
 		// MenuRoot는 씬 내 적당한 위치 (Canvas 바깥)
@@ -122,14 +109,14 @@ public static class MainMenuSceneBuilder
 		var buttonHandler = menuRoot.AddComponent<MainMenuButtonHandler>();
 
 		// MainMenuController 참조 연결
-		SetPrivateField(menuController, "logoGroup", logoCanvasGroup);
-		SetPrivateField(menuController, "menuButtonsGroup", menuButtonsCanvasGroup);
+		SBU.SetField(menuController, "logoGroup", logoCanvasGroup);
+		SBU.SetField(menuController, "menuButtonsGroup", menuButtonsCanvasGroup);
 
 		// MainMenuButtonHandler 참조 연결
-		SetPrivateField(buttonHandler, "menuController", menuController);
-		SetPrivateField(buttonHandler, "settingsPopup",
+		SBU.SetField(buttonHandler, "menuController", menuController);
+		SBU.SetField(buttonHandler, "settingsPopup",
 			settingsPopup.GetComponent<SimplePopup>());
-		SetPrivateField(buttonHandler, "creditsPopup",
+		SBU.SetField(buttonHandler, "creditsPopup",
 			creditsPopup.GetComponent<SimplePopup>());
 
 		// 버튼 OnClick 연결
@@ -147,20 +134,15 @@ public static class MainMenuSceneBuilder
 		}, includeDrumRoll: false);
 
 		// ── 씬 저장 ─────────────────────────────────────────────────
-		Directory.CreateDirectory("Assets/Scenes");
-		EditorSceneManager.SaveScene(scene, ScenePath);
-
-		// Build Settings에 씬 추가
-		AddSceneToBuildSettings(ScenePath);
-
-		EditorUtility.DisplayDialog("완료",
+		return SBU.SaveSceneAndShowDialog(scene, ScenePath,
 			$"MainMenu 씬이 {ScenePath} 에 생성되었습니다.\n\n" +
 			"★ Inspector 연결 필수 항목:\n" +
 			"  MenuRoot → MainMenuController: logoGroup, menuButtonsGroup, characterGroup\n" +
 			"  MenuRoot → MainMenuButtonHandler: settingsPopup, creditsPopup, menuController\n" +
 			"  Character/ClickArea → CharacterEasterEggController: speechBubble, speechText\n\n" +
 			"자세한 내용은 README 또는 씬 구성 문서를 참고하세요.",
-			"확인");
+			SBU.BuildSettingsPlacement.InsertFirst,
+			showCompletionDialog);
 	}
 
 	// ─────────────────────────────────────────────────────────────────
@@ -169,6 +151,126 @@ public static class MainMenuSceneBuilder
 
 	private static void SetStretch(GameObject target)
 		=> SBU.Stretch(target.GetComponent<RectTransform>());
+
+	private static Sprite LoadMainScreenLogoSprite()
+	{
+		EnsureMainScreenLogoImportSettings();
+
+		var sprite = AssetDatabase.LoadAssetAtPath<Sprite>(MainScreenLogoPath);
+		if (sprite != null)
+			return sprite;
+
+		var sprites = AssetDatabase.LoadAllAssetRepresentationsAtPath(MainScreenLogoPath);
+		foreach (var asset in sprites)
+		{
+			if (asset is Sprite subSprite)
+				return subSprite;
+		}
+
+		return null;
+	}
+
+	private static void EnsureMainScreenLogoImportSettings()
+	{
+		if (!File.Exists(MainScreenLogoPath))
+		{
+			Debug.LogWarning($"[MainMenuSceneBuilder] 메인화면 에셋 파일이 없습니다: {MainScreenLogoPath}");
+			return;
+		}
+
+		if (ConvertMisnamedPngIfNeeded(MainScreenLogoPath))
+			AssetDatabase.ImportAsset(MainScreenLogoPath, ImportAssetOptions.ForceUpdate);
+
+		if (AssetImporter.GetAtPath(MainScreenLogoPath) is not TextureImporter importer)
+		{
+			Debug.LogWarning($"[MainMenuSceneBuilder] TextureImporter를 찾을 수 없습니다: {MainScreenLogoPath}");
+			return;
+		}
+
+		bool changed = false;
+		if (importer.textureType != TextureImporterType.Sprite)
+		{
+			importer.textureType = TextureImporterType.Sprite;
+			changed = true;
+		}
+
+		if (importer.spriteImportMode != SpriteImportMode.Single)
+		{
+			importer.spriteImportMode = SpriteImportMode.Single;
+			changed = true;
+		}
+
+		if (importer.mipmapEnabled)
+		{
+			importer.mipmapEnabled = false;
+			changed = true;
+		}
+
+		if (!importer.alphaIsTransparency)
+		{
+			importer.alphaIsTransparency = true;
+			changed = true;
+		}
+
+		if (importer.npotScale != TextureImporterNPOTScale.None)
+		{
+			importer.npotScale = TextureImporterNPOTScale.None;
+			changed = true;
+		}
+
+		var settings = new TextureImporterSettings();
+		importer.ReadTextureSettings(settings);
+		if (settings.spriteMeshType != SpriteMeshType.FullRect)
+		{
+			settings.spriteMeshType = SpriteMeshType.FullRect;
+			importer.SetTextureSettings(settings);
+			changed = true;
+		}
+
+		if (changed)
+			importer.SaveAndReimport();
+	}
+
+	private static bool ConvertMisnamedPngIfNeeded(string assetPath)
+	{
+		if (!assetPath.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+			return false;
+
+		var bytes = File.ReadAllBytes(assetPath);
+		if (HasPngHeader(bytes))
+			return false;
+
+		var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+		try
+		{
+			if (!ImageConversion.LoadImage(texture, bytes, false))
+			{
+				Debug.LogWarning($"[MainMenuSceneBuilder] {assetPath} 확장자는 PNG지만 PNG/JPG로 디코딩할 수 없습니다. 원본 포맷을 PNG로 다시 저장해 주세요.");
+				return false;
+			}
+
+			File.WriteAllBytes(assetPath, ImageConversion.EncodeToPNG(texture));
+			Debug.LogWarning($"[MainMenuSceneBuilder] {assetPath}의 실제 포맷이 .png 확장자와 달라 PNG로 변환했습니다.");
+			return true;
+		}
+		finally
+		{
+			UnityEngine.Object.DestroyImmediate(texture);
+		}
+	}
+
+	private static bool HasPngHeader(byte[] bytes)
+	{
+		return bytes.Length >= 8
+			&& bytes[0] == 0x89
+			&& bytes[1] == 0x50
+			&& bytes[2] == 0x4E
+			&& bytes[3] == 0x47
+			&& bytes[4] == 0x0D
+			&& bytes[5] == 0x0A
+			&& bytes[6] == 0x1A
+			&& bytes[7] == 0x0A;
+	}
 
 	private static GameObject CreateMenuButton(Transform parent, string name, string label)
 	{
@@ -206,10 +308,10 @@ public static class MainMenuSceneBuilder
 
 		// SettingsPopupController 슬라이더 연결
 		var settingsController = settingsPopup.GetComponent<SettingsPopupController>();
-		SetPrivateField(settingsController, "bgmSlider", bgmRow.Slider);
-		SetPrivateField(settingsController, "sfxSlider", sfxRow.Slider);
-		SetPrivateField(settingsController, "bgmValueLabel", bgmRow.ValueLabel);
-		SetPrivateField(settingsController, "sfxValueLabel", sfxRow.ValueLabel);
+		SBU.SetField(settingsController, "bgmSlider", bgmRow.Slider);
+		SBU.SetField(settingsController, "sfxSlider", sfxRow.Slider);
+		SBU.SetField(settingsController, "bgmValueLabel", bgmRow.ValueLabel);
+		SBU.SetField(settingsController, "sfxValueLabel", sfxRow.ValueLabel);
 
 		// Close 버튼
 		var closeButton = CreateMenuButton(settingsPopup.transform, "CloseButton", "✕  Close");
@@ -365,22 +467,4 @@ public static class MainMenuSceneBuilder
 
 	private static void CenterPopup(GameObject target, float width, float height)
 		=> SBU.CenterPopup(target, width, height);
-
-	private static void SetPrivateField(object target, string fieldName, object value)
-		=> SBU.SetField(target, fieldName, value);
-
-	private static void AddSceneToBuildSettings(string path)
-	{
-		var scenes = EditorBuildSettings.scenes;
-		foreach (var existingScene in scenes)
-			if (existingScene.path == path)
-				return;
-
-		var updatedScenes = new EditorBuildSettingsScene[scenes.Length + 1];
-		// MainMenu를 첫 번째(index 0)에 삽입
-		updatedScenes[0] = new EditorBuildSettingsScene(path, true);
-		for (int i = 0; i < scenes.Length; i++)
-			updatedScenes[i + 1] = scenes[i];
-		EditorBuildSettings.scenes = updatedScenes;
-	}
 }

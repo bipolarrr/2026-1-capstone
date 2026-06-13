@@ -13,25 +13,35 @@ public static class DiceBattleSceneBuilder
 	static readonly Color PanelBg = new Color(0.12f, 0.14f, 0.24f, 0.95f);
 	static readonly Color CancelColor = new Color(0.55f, 0.18f, 0.18f, 0.9f);
 	static readonly Color CancelHighlight = new Color(0.70f, 0.25f, 0.25f, 1f);
-	static readonly Color HpBarBg = new Color(0.15f, 0.15f, 0.15f);
 	static readonly Color EnemyHpFill = new Color(0.85f, 0.25f, 0.25f);
 	static readonly Color TargetMarkerColor = new Color(1f, 0.85f, 0.2f, 0.9f);
 	static readonly Color AccentYellow = new Color(1f, 0.85f, 0.3f);
 	static readonly Color SaveZoneVisual = new Color(0.55f, 0.40f, 0.04f, 0.6f);
-	const float PlayerSpriteScale = 1.4f;
-	const float DiceRollSpriteScaleMultiplier = 1.5f;
-	const float SmallHitSpriteScaleMultiplier = 1.5f;
-	const float StrongHitSpriteScaleMultiplier = 1.41f;
+	const float DiceSlotCenterZ = 1.2f;
+	const float DiceArenaDepth = 4f;
+	const float DiceArenaAspect = 968f / 496f;
+	const float DiceArenaWidth = DiceArenaDepth * DiceArenaAspect;
 
 	[MenuItem("Tools/Build DiceBattle Scene")]
 	public static void BuildScene()
 	{
+		BuildSceneInternal(showCompletionDialog: true);
+	}
+
+	public static bool BuildForIncremental()
+	{
+		return BuildSceneInternal(showCompletionDialog: false);
+	}
+
+	static bool BuildSceneInternal(bool showCompletionDialog)
+	{
+		SceneBuilderUtility.BeginSceneBuildValidation(nameof(DiceBattleSceneBuilder));
 		var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
 		// ── RenderTexture ──
 		EnsureDirectory("Assets/Textures");
 		var renderTex = EnsureRenderTexture(
-			"Assets/Textures/DiceRenderTexture.renderTexture", 240, 135, FilterMode.Point);
+			"Assets/Textures/DiceRenderTexture.renderTexture", 968, 496, FilterMode.Point);
 
 		// ── PhysicsMaterial ──
 		string pmPath = "Assets/Physics/DiceBouncy.asset";
@@ -55,32 +65,26 @@ public static class DiceBattleSceneBuilder
 			outlineMat.name = "DiceOutline";
 			AssetDatabase.CreateAsset(outlineMat, outlineMatPath);
 		}
+		var slimeJellyMaterial = EnsureSlimeJellyMaterial();
 
 		// ── Dice3D 레이어 ──
 		int diceLayer = EnsureLayer("Dice3D");
 
-		// ── MainCamera ──
-		var mainCamGo = new GameObject("MainCamera");
-		mainCamGo.tag = "MainCamera";
-		var mainCam = mainCamGo.AddComponent<Camera>();
-		mainCam.orthographic = true;
-		mainCam.orthographicSize = 5;
-		mainCam.clearFlags = CameraClearFlags.SolidColor;
-		mainCam.backgroundColor = BgColor;
+		var shell = SceneBuilderUtility.BuildSceneShell("MainCamera", BgColor, includeEventSystem: false);
+		var mainCam = shell.camera;
 		mainCam.cullingMask = ~(1 << diceLayer);
 
 		// ── DiceCamera (top-down orthographic) ──
-		// 주사위 정지 위치: x ∈ [-2.8, 2.8], y ≈ 0.95, z = 1.2
-		// ortho size 2, aspect 16:9 → visible x ±3.56, z ±2 (중심 z=1.2)
+		// Dice_Tray.png 큰 주사위칸 내부 바닥(x 360..1328, y 96..592)에 맞춘 카메라.
 		var diceCamGo = new GameObject("DiceCamera");
 		var diceCam = diceCamGo.AddComponent<Camera>();
 		diceCam.clearFlags = CameraClearFlags.SolidColor;
 		diceCam.backgroundColor = new Color(0f, 0f, 0f, 0f);
 		diceCam.orthographic     = true;
-		diceCam.orthographicSize = 2f;
+		diceCam.orthographicSize = DiceArenaDepth * 0.5f;
 		diceCam.cullingMask = 1 << diceLayer;
 		diceCam.targetTexture = renderTex;
-		diceCamGo.transform.position = new Vector3(0f, 10f, 1.2f);
+		diceCamGo.transform.position = new Vector3(0f, 10f, DiceSlotCenterZ);
 		diceCamGo.transform.rotation = Quaternion.Euler(90, 0, 0);
 
 		// ── 조명 ──
@@ -103,247 +107,47 @@ public static class DiceBattleSceneBuilder
 
 		// ── 물리 환경 ──
 		BuildPhysicsEnvironment(diceLayer, bouncyMat, wallMat);
+		BuildVault(diceLayer, bouncyMat, wallMat);
 
 		// ── 주사위 5개 ──
-		var dicePrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Dices/Prefabs/Dice_d6.prefab");
-		float dieRadius = 0.35f;
+		var dicePrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Dices/Prefabs/Dice_d6_mine.prefab");
+		if (dicePrefab == null)
+		{
+			Debug.LogWarning("[DiceBattleSceneBuilder] Dice_d6_mine.prefab 없음 — Tools/Build Dice Prefabs/D6 Mine 실행 후 다시 빌드하세요. 기존 Dice_d6.prefab으로 대체합니다.");
+			dicePrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Dices/Prefabs/Dice_d6.prefab");
+		}
+		var defaultEnemyDiceProfile = EnemyDiceProfile.CreateDefault(dicePrefab);
+		var enemyDiceProfileCatalog = CreateEnemyDiceProfileCatalog(dicePrefab);
+		NormalizeEnemyDiceProfiles(defaultEnemyDiceProfile, enemyDiceProfileCatalog);
+		float dieRadius = 0.2625f;
 		var diceArr = CreateDiceSet("Die", Vector3.zero, diceLayer,
-			bouncyMat, outlineMat, dicePrefab, dieRadius);
+			bouncyMat, outlineMat, dicePrefab, dieRadius, 0.525f);
 
-		// ── 캔버스 ──
-		var canvasGo = new GameObject("Canvas");
-		var canvas = canvasGo.AddComponent<Canvas>();
-		canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-		var scaler = canvasGo.AddComponent<CanvasScaler>();
-		scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-		scaler.referenceResolution = new Vector2(1920, 1080);
-		scaler.matchWidthOrHeight = 0.5f;
-		canvasGo.AddComponent<GraphicRaycaster>();
+		var canvasGo = shell.canvas.gameObject;
 
-		// 하단 조작창 위 2/3: Fight_Background 이미지 (하단부만 보이도록 마스크 클리핑)
-		var fightBgMask = CreateEmpty(canvasGo, "FightBackgroundMask");
-		fightBgMask.anchorMin = new Vector2(0f, 1f / 3f);
-		fightBgMask.anchorMax = new Vector2(1f, 1f);
-		fightBgMask.offsetMin = Vector2.zero;
-		fightBgMask.offsetMax = Vector2.zero;
-		fightBgMask.gameObject.AddComponent<RectMask2D>();
-
-		// 기본 스테이지의 배경으로 초기 렌더 — 런타임이 ApplyStageBackground로 활성 스테이지에 맞게 교체
-		var defaultStage = StageRegistry.DefaultStage;
-		var defaultBundle = defaultStage != null ? SceneBuilderUtility.BuildStageBundle(defaultStage) : null;
-		Sprite fightBgSprite = defaultBundle != null ? defaultBundle.background : null;
-		float fightBgAspect = 16f / 9f;
-		if (fightBgSprite != null && fightBgSprite.texture != null)
-			fightBgAspect = (float)fightBgSprite.texture.width / fightBgSprite.texture.height;
-		float fightBgHeight = 1920f / fightBgAspect;
-		var fightBgImg = CreateImage(fightBgMask.gameObject, "FightBackground", Color.white);
-		fightBgImg.anchorMin = new Vector2(0f, 0f);
-		fightBgImg.anchorMax = new Vector2(1f, 0f);
-		fightBgImg.pivot = new Vector2(0.5f, 0f);
-		fightBgImg.offsetMin = new Vector2(0f, 0f);
-		fightBgImg.offsetMax = new Vector2(0f, fightBgHeight);
-		var fightBgImageComp = fightBgImg.GetComponent<Image>();
-		if (fightBgSprite != null)
-			fightBgImageComp.sprite = fightBgSprite;
-		else if (defaultStage != null)
-			fightBgImageComp.color = defaultStage.themeColor;
-		else
-			fightBgImageComp.color = BgColor;
+		var fightBackground = SceneBuilderUtility.BuildStageBackground(
+			canvasGo.transform, "FightBackgroundMask", "FightBackground", BgColor);
 
 		// ── 지면 기준선 (배경 흙길 높이 — 캔버스 절대 Y) ──
 		const float GroundY = 0.44f;
 
-		// ── 플레이어 캐릭터 (프레임 기반 자동 애니메이션) ──
-		Sprite[] idleSprites = LoadPlayerSpriteFrames("Assets/Player/IdleSprites", 19);
-		Sprite[] lowHpSprites = LoadPlayerSpriteFrames("Assets/Player/LowHpSprites", 174);
-		Sprite[] jumpSprites = LoadPlayerSpriteFrames("Assets/Player/JumpSprites", 145);
-		Sprite[] jumpBelowSprites = LoadPlayerSpriteFrames("Assets/Player/JumpBelowSprites", 145);
-		Sprite[] defenseSprites = LoadPlayerSpriteFrames("Assets/Player/DefenseSprites", 145);
-		Sprite[] smallHitSprites = LoadPlayerSpriteFrames("Assets/Player/SmallHitSprites", 56);
-		Sprite[] strongHitSprites = LoadPlayerSpriteFrames("Assets/Player/StrongHitSprites", 28);
-		Sprite[] debuffSprites = LoadPlayerSpriteFrames("Assets/Player/DebuffSprites", 156);
-
-		Sprite idleSprite = (idleSprites != null && idleSprites.Length > 0) ? idleSprites[0] : null;
-
-		// 점프 발밑 효과 (PlayerBody보다 먼저 생성 → 더 낮은 sibling index = 플레이어 뒤로 렌더)
-		var jumpBelow = CreateImage(canvasGo, "PlayerJumpBelow", Color.white);
-		jumpBelow.pivot = new Vector2(0.5f, 0f);
-		jumpBelow.anchorMin = new Vector2(0.19f, GroundY);
-		jumpBelow.anchorMax = new Vector2(0.19f, GroundY);
-		jumpBelow.sizeDelta = new Vector2(150f, 150f);
-		jumpBelow.localScale = new Vector3(2f, 2f, 1f);
-		var jumpBelowImg = jumpBelow.GetComponent<Image>();
-		jumpBelowImg.preserveAspect = true;
-		jumpBelowImg.useSpriteMesh = false;
-		jumpBelowImg.raycastTarget = false;
-		jumpBelowImg.enabled = false;
-
-		var playerBody = CreateImage(canvasGo, "PlayerBody", Color.white);
-		playerBody.pivot = new Vector2(0.5f, 0f);               // 피벗 하단 → 발 기준 배치
-		playerBody.anchorMin = new Vector2(0.19f, GroundY);      // 단일 앵커점 (지면)
-		playerBody.anchorMax = new Vector2(0.19f, GroundY);
-		playerBody.sizeDelta = new Vector2(150f, 150f);
-		playerBody.localScale = new Vector3(PlayerSpriteScale, PlayerSpriteScale, 1f);
-		var playerImg = playerBody.GetComponent<Image>();
-		playerImg.preserveAspect = true;
-		playerImg.useSpriteMesh = false;
-		playerImg.raycastTarget = false;
-		if (idleSprite != null)
-			playerImg.sprite = idleSprite;
-
-		// PlayerBodyAnimator: Idle 루프 + HP 20% 이하면 LowHP 루프로 자동 전환
-		// SmallHit/StrongHit/Defense/Jump/Debuff는 주입만 (외부 재생 시점에 사용)
-		var bodyAnim = playerBody.gameObject.AddComponent<PlayerBodyAnimator>();
-		SetField(bodyAnim, "playerBody", playerImg);
-		SetField(bodyAnim, "frameRate", SceneBuilderUtility.BattlePlayerActionFrameRate);
-		SetField(bodyAnim, "idleFrameRate", SceneBuilderUtility.BattlePlayerIdleFrameRate);
-		SetField(bodyAnim, "idleSprites", idleSprites);
-		SetField(bodyAnim, "lowHpSprites", lowHpSprites);
-		SetField(bodyAnim, "jumpSprites", jumpSprites);
-		SetField(bodyAnim, "defenseSprites", defenseSprites);
-		SetField(bodyAnim, "smallHitSprites", smallHitSprites);
-		SetField(bodyAnim, "strongHitSprites", strongHitSprites);
-		SetField(bodyAnim, "debuffSprites", debuffSprites);
-		SetField(bodyAnim, "smallHitScaleMultiplier", SmallHitSpriteScaleMultiplier);
-		SetField(bodyAnim, "smallHitHorizontalFlip", true);
-		SetField(bodyAnim, "smallHitFrameStep", 2);
-		SetField(bodyAnim, "strongHitScaleMultiplier", StrongHitSpriteScaleMultiplier);
-		SetField(bodyAnim, "strongHitHorizontalFlip", true);
-		SetField(bodyAnim, "strongHitFrameStep", 1);
-
-		// ── 적 슬롯 (지면 위, 플레이어 오른쪽 — Explore 동일 구조) ──
-		var enemySlotsArea = CreateEmpty(canvasGo, "EnemySlotsArea");
-		enemySlotsArea.anchorMin = new Vector2(0.45f, GroundY);
-		enemySlotsArea.anchorMax = new Vector2(0.95f, GroundY + 0.35f);
-		enemySlotsArea.offsetMin = Vector2.zero;
-		enemySlotsArea.offsetMax = Vector2.zero;
+		var playerRig = SceneBuilderUtility.BuildBattlePlayerRig(
+			canvasGo.transform, GroundY, includeJumpBelow: true);
+		var playerImg = playerRig.bodyImage;
+		var bodyAnim = playerRig.bodyAnimator;
+		var jumpBelowImg = playerRig.jumpBelowImage;
+		var jumpBelowSprites = playerRig.jumpBelowSprites;
 
 		// 스테이지별 스프라이트 번들을 편집 시점에 한 번 로드 — 누락 에셋은 themeColor 폴백
 		var stageBundles = SceneBuilderUtility.BuildAllStageBundles();
 
-		GameObject[] enemyPanels = new GameObject[4];
-		Image[] enemyBodies = new Image[4];
-		EnemySpriteAnimator[] enemyAnimators = new EnemySpriteAnimator[4];
-		TMP_Text[] enemyNameTexts = new TMP_Text[4];
-		Image[] enemyHpFillArr = new Image[4];
-		TMP_Text[] enemyHpTextArr = new TMP_Text[4];
-		Image[] targetMarkers = new Image[4];
-		TMP_Text[] deadOverlays = new TMP_Text[4];
-		Button[] enemyPanelButtons = new Button[4];
+		var enemySlots = SceneBuilderUtility.BuildBattleEnemySlots(
+			canvasGo.transform, GroundY, EnemyHpFill, TargetMarkerColor);
 		TMP_Text[] enemyDiceResultTexts = new TMP_Text[4];
-
 		for (int i = 0; i < 4; i++)
 		{
-			float x0 = i * 0.25f;
-			float x1 = x0 + 0.24f;
-
-			// 슬롯 (투명 — 스프라이트만 보임)
-			var slot = CreateImage(enemySlotsArea.gameObject, $"EnemySlot{i}",
-				new Color(0, 0, 0, 0));
-			slot.anchorMin = new Vector2(x0, 0.0f);
-			slot.anchorMax = new Vector2(x1, 1.0f);
-			slot.offsetMin = Vector2.zero;
-			slot.offsetMax = Vector2.zero;
-			slot.GetComponent<Image>().raycastTarget = true;
-			enemyPanels[i] = slot.gameObject;
-
-			// 적 몸체 (하단을 바닥에 밀착 — 런타임에서 MobBodyAnchors로 재조정)
-			var body = CreateImage(slot.gameObject, "Body", Color.gray);
-			body.anchorMin = new Vector2(0.05f, 0.0f);
-			body.anchorMax = new Vector2(0.95f, 0.90f);
-			body.offsetMin = Vector2.zero;
-			body.offsetMax = Vector2.zero;
-			var bodyImg = body.GetComponent<Image>();
-			bodyImg.preserveAspect = true;
-			bodyImg.useSpriteMesh = true;
-			enemyBodies[i] = bodyImg;
-			var enemyAnimator = body.gameObject.AddComponent<EnemySpriteAnimator>();
-			SetField(enemyAnimator, "targetImage", bodyImg);
-			SetField(enemyAnimator, "idleFrameRate", SceneBuilderUtility.BattleEnemyIdleFrameRate);
-			SetField(enemyAnimator, "actionFrameRate", SceneBuilderUtility.BattleEnemyActionFrameRate);
-			enemyAnimators[i] = enemyAnimator;
-
-			// 타겟 마커 (노란 테두리, Body와 동일 영역)
-			var marker = CreateImage(slot.gameObject, "TargetMarker", new Color(0, 0, 0, 0));
-			marker.anchorMin = new Vector2(0.05f, 0.0f);
-			marker.anchorMax = new Vector2(0.95f, 0.90f);
-			marker.offsetMin = Vector2.zero;
-			marker.offsetMax = Vector2.zero;
-			marker.GetComponent<Image>().raycastTarget = false;
-			// 테두리 두께 기본값 — 런타임에 MobDef.borderThickness로 몹별 재적용됨.
-			SceneBuilderUtility.MakeEnemyTargetBorders(marker, 0.05f, TargetMarkerColor);
-			targetMarkers[i] = marker.GetComponent<Image>();
-			marker.gameObject.SetActive(false);
-
-			// 사망 오버레이 (Body와 동일 영역)
-			var deadOverlay = CreateTMPText(slot.gameObject, "DeadOverlay", "✕",
-				60, new Color(1f, 0.2f, 0.2f, 0.85f), TextAlignmentOptions.Center);
-			var deadRt = deadOverlay.GetComponent<RectTransform>();
-			deadRt.anchorMin = new Vector2(0.05f, 0.0f);
-			deadRt.anchorMax = new Vector2(0.95f, 0.90f);
-			deadRt.offsetMin = Vector2.zero;
-			deadRt.offsetMax = Vector2.zero;
-			deadOverlay.raycastTarget = false;
-			deadOverlay.gameObject.SetActive(false);
-			deadOverlays[i] = deadOverlay;
-
-			// 정보 패널 (반투명 배경 — 이름 + HP 바 + HP 텍스트)
-			var infoPanel = CreateImage(slot.gameObject, "InfoPanel",
-				new Color(0f, 0f, 0f, 0.5f));
-			infoPanel.anchorMin = new Vector2(0.0f, 0.90f);
-			infoPanel.anchorMax = new Vector2(1.0f, 1.08f);
-			infoPanel.offsetMin = Vector2.zero;
-			infoPanel.offsetMax = Vector2.zero;
-			infoPanel.GetComponent<Image>().raycastTarget = false;
-
-			// 이름 (InfoPanel 상단 — 슬롯 기준 0.96~1.08 → 패널 내 0.333~1.0)
-			var nameT = CreateTMPText(infoPanel.gameObject, "Name", "적",
-				22, Color.white, TextAlignmentOptions.Center);
-			var nrt = nameT.GetComponent<RectTransform>();
-			nrt.anchorMin = new Vector2(0.0f, 0.333f);
-			nrt.anchorMax = new Vector2(1.0f, 1.0f);
-			nrt.offsetMin = Vector2.zero;
-			nrt.offsetMax = Vector2.zero;
-			nameT.fontStyle = FontStyles.Bold;
-			enemyNameTexts[i] = nameT;
-
-			// HP 바 (InfoPanel 하단 — 슬롯 기준 0.90~0.96 → 패널 내 0.0~0.333)
-			var hpBg = CreateImage(infoPanel.gameObject, "HpBarBg", HpBarBg);
-			hpBg.anchorMin = new Vector2(0.10f, 0.0f);
-			hpBg.anchorMax = new Vector2(0.90f, 0.333f);
-			hpBg.offsetMin = Vector2.zero;
-			hpBg.offsetMax = Vector2.zero;
-
-			var eFill = CreateImage(hpBg.gameObject, "HpFill", EnemyHpFill);
-			Stretch(eFill);
-			var eFillImg = eFill.GetComponent<Image>();
-			eFillImg.sprite = SceneBuilderUtility.WhitePixelSprite();
-			eFillImg.type = Image.Type.Filled;
-			eFillImg.fillMethod = Image.FillMethod.Horizontal;
-			enemyHpFillArr[i] = eFill.GetComponent<Image>();
-
-			// HP 텍스트 (HP 바와 겹침)
-			var eHpT = CreateTMPText(infoPanel.gameObject, "HpText", "0 / 0",
-				18, Color.white, TextAlignmentOptions.Center);
-			var eHpRt = eHpT.GetComponent<RectTransform>();
-			eHpRt.anchorMin = new Vector2(0.05f, 0.0f);
-			eHpRt.anchorMax = new Vector2(0.95f, 0.333f);
-			eHpRt.offsetMin = Vector2.zero;
-			eHpRt.offsetMax = Vector2.zero;
-			enemyHpTextArr[i] = eHpT;
-
-			// 슬롯 클릭으로 타겟 선택
-			var panelBtn = slot.gameObject.AddComponent<Button>();
-			panelBtn.targetGraphic = slot.GetComponent<Image>();
-			var btnColors = panelBtn.colors;
-			btnColors.normalColor = new Color(0, 0, 0, 0);
-			btnColors.highlightedColor = new Color(1f, 1f, 1f, 0.08f);
-			btnColors.pressedColor = new Color(1f, 1f, 1f, 0.15f);
-			btnColors.selectedColor = btnColors.highlightedColor;
-			panelBtn.colors = btnColors;
-			enemyPanelButtons[i] = panelBtn;
-
 			// 적 주사위 결과 텍스트 (이름 위)
+			var slot = enemySlots.slotRoots[i];
 			var diceResultT = CreateTMPText(slot.gameObject, "DiceResult", "",
 				18, AccentYellow, TextAlignmentOptions.Center);
 			var drRt = diceResultT.GetComponent<RectTransform>();
@@ -353,172 +157,165 @@ public static class DiceBattleSceneBuilder
 			drRt.offsetMax = Vector2.zero;
 			diceResultT.fontStyle = FontStyles.Bold;
 			enemyDiceResultTexts[i] = diceResultT;
-
 		}
 
 		// 주사위 눈 스프라이트 생성 (1~6)
 		var diceFaceSprites = GenerateDiceFaceSprites();
 
-		// 적 주사위 눈 표시 컨테이너 — 적 패널 왼쪽(=플레이어 방향)에 나란히 배치.
-		// 적이 플레이어 앞까지 걸어와 멈추면 이 컨테이너가 적 바로 앞에 놓인다.
-		GameObject[] enemyDiceFaceContainers = new GameObject[4];
-		for (int i = 0; i < 4; i++)
-		{
-			var container = CreateEmpty(enemyPanels[i], $"EnemyDiceFaces{i}");
-			container.anchorMin = new Vector2(-0.35f, 0.00f);
-			container.anchorMax = new Vector2(0.00f, 0.25f);
-			container.offsetMin = Vector2.zero;
-			container.offsetMax = Vector2.zero;
-			var hlg = container.gameObject.AddComponent<HorizontalLayoutGroup>();
-			hlg.spacing = 4;
-			hlg.childAlignment = TextAnchor.MiddleRight;
-			hlg.childControlWidth = false;
-			hlg.childControlHeight = false;
-			hlg.childForceExpandWidth = false;
-			hlg.childForceExpandHeight = false;
-
-			// 주사위 5개분 Image 슬롯 생성 (정사각형 고정 크기)
-			float diceSize = 42f;
-			for (int d = 0; d < 5; d++)
-			{
-				var faceImg = CreateImage(container.gameObject, $"Face{d}", Color.white);
-				faceImg.GetComponent<Image>().preserveAspect = true;
-				faceImg.GetComponent<Image>().raycastTarget = false;
-				faceImg.sizeDelta = new Vector2(diceSize, diceSize);
-				faceImg.gameObject.SetActive(false);
-			}
-
-			container.gameObject.SetActive(false);
-			enemyDiceFaceContainers[i] = container.gameObject;
-		}
-
 		// 데미지 스폰 영역 (적 슬롯 위쪽에 겹침)
-		var dmgSpawn = CreateEmpty(canvasGo, "DamageSpawnArea");
-		dmgSpawn.anchorMin = new Vector2(0.40f, GroundY + 0.20f);
-		dmgSpawn.anchorMax = new Vector2(0.98f, GroundY + 0.35f);
-		dmgSpawn.offsetMin = Vector2.zero;
-		dmgSpawn.offsetMax = Vector2.zero;
+		var dmgSpawn = SceneBuilderUtility.BuildBattleDamageSpawnArea(canvasGo.transform, GroundY);
 
 		// ── 플레이어 하트 (좌상단) ──
-		var heartTextObj = CreateTMPText(canvasGo, "PlayerHeartText", "● ● ● ● ●",
-			48, new Color(1f, 0.13f, 0.13f), TextAlignmentOptions.Left);
-		heartTextObj.richText = true;
-		var heartRt = heartTextObj.GetComponent<RectTransform>();
-		heartRt.anchorMin = new Vector2(0.02f, 0.90f);
-		heartRt.anchorMax = new Vector2(0.40f, 0.99f);
-		heartRt.offsetMin = Vector2.zero;
-		heartRt.offsetMax = Vector2.zero;
+		var heartDisplayComp = SceneBuilderUtility.BuildHeartDisplay(
+			canvasGo.transform, "PlayerHeartDisplay",
+			new Vector2(0.02f, 0.88f), new Vector2(0.56f, 0.995f));
 
-		var heartDisplayComp = heartTextObj.gameObject.AddComponent<HeartDisplay>();
-		SetField(heartDisplayComp, "heartText", heartTextObj);
-
-		// ── 하단 1/3: UI 배경 이미지 ──
-		EnsureTightSprite("Assets/Mobs/UI_Background.png");
+		// ── 하단 40%: UI 배경 이미지 ──
+		EnsureTightSprite("Assets/UI/UI_Background.png");
 		var uiBgImg = CreateImage(canvasGo, "UIBackground", Color.white);
 		uiBgImg.anchorMin = new Vector2(0f, 0f);
-		uiBgImg.anchorMax = new Vector2(1f, 1f / 3f);
+		uiBgImg.anchorMax = new Vector2(1f, 0.4f);
 		uiBgImg.offsetMin = Vector2.zero;
 		uiBgImg.offsetMax = Vector2.zero;
-		var uiBgSprite = AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Mobs/UI_Background.png");
+		var uiBgSprite = AssetDatabase.LoadAssetAtPath<Sprite>("Assets/UI/UI_Background.png");
 		if (uiBgSprite != null)
 			uiBgImg.GetComponent<Image>().sprite = uiBgSprite;
 		else
 			uiBgImg.GetComponent<Image>().color = BgColor;
 
-		// ── 하단 1/3 영역: 현재 필요한 조작 패널을 크게 표시 ──
+		// ── 하단 40% 영역: 현재 필요한 조작 패널을 크게 표시 ──
 		var lowerArea = CreateEmpty(canvasGo, "LowerArea");
 		lowerArea.anchorMin = new Vector2(0.03f, 0.02f);
-		lowerArea.anchorMax = new Vector2(0.97f, 0.315f);
+		lowerArea.anchorMax = new Vector2(0.97f, 0.385f);
 		lowerArea.offsetMin = Vector2.zero;
 		lowerArea.offsetMax = Vector2.zero;
 
-		var dicePanel = CreateImage(lowerArea.gameObject, "DicePanel",
+		var dicePanel = CreateImage(canvasGo, "DicePanel",
 			new Color(0f, 0f, 0f, 0f));
-		dicePanel.anchorMin = new Vector2(0.28f, 0f);
-		dicePanel.anchorMax = new Vector2(1f, 1f);
-		dicePanel.offsetMin = Vector2.zero;
-		dicePanel.offsetMax = Vector2.zero;
-		dicePanel.GetComponent<Image>().raycastTarget = false;
+		dicePanel.anchorMin = new Vector2(1f, 0f);
+		dicePanel.anchorMax = new Vector2(1f, 0f);
+		dicePanel.pivot = new Vector2(1f, 0f);
+		dicePanel.anchoredPosition = Vector2.zero;
+		dicePanel.sizeDelta = new Vector2(864f, 432f);
+		var dicePanelImage = dicePanel.GetComponent<Image>();
+		dicePanelImage.raycastTarget = false;
+		dicePanelImage.preserveAspect = true;
+		const string diceTrayPath = "Assets/Dices/Dice_Tray.png";
+		if (System.IO.File.Exists(diceTrayPath))
+		{
+			EnsurePixelSprite(diceTrayPath);
+			var diceTraySprite = AssetDatabase.LoadAssetAtPath<Sprite>(diceTrayPath);
+			if (diceTraySprite != null)
+			{
+				dicePanelImage.sprite = diceTraySprite;
+				dicePanelImage.color = Color.white;
+			}
+		}
+		else
+		{
+			Debug.LogWarning($"[DiceBattleSceneBuilder] 주사위 트레이 이미지 없음: {diceTrayPath}");
+		}
 
-		// ── 저장된 주사위 (좌측 세로 스트립) ──
-		float heldStripWidth = 0.14f;
-
+		// ── 저장된 주사위 (트레이 좌측 5칸) ──
 		var heldStrip = CreateImage(dicePanel.gameObject, "HeldDiceStrip",
-			new Color(0.08f, 0.08f, 0.16f, 0.85f));
-		heldStrip.anchorMin = new Vector2(0f, 0f);
-		heldStrip.anchorMax = new Vector2(heldStripWidth, 1f);
+			new Color(0f, 0f, 0f, 0f));
+		heldStrip.anchorMin = new Vector2(0.045f, 0.085f);
+		heldStrip.anchorMax = new Vector2(0.20f, 0.905f);
 		heldStrip.offsetMin = Vector2.zero;
 		heldStrip.offsetMax = Vector2.zero;
 		heldStrip.GetComponent<Image>().raycastTarget = false;
 
-		var heldLabel = CreateTMPText(heldStrip.gameObject, "HeldDiceLabel", "저장",
-			18, new Color(0.65f, 0.68f, 0.85f), TextAlignmentOptions.Center);
+		var heldLabel = CreateTMPText(heldStrip.gameObject, "HeldDiceLabel", "",
+			18, new Color(0.65f, 0.68f, 0.85f), TextAlignmentOptions.MidlineLeft);
 		var hlRt = heldLabel.GetComponent<RectTransform>();
-		hlRt.anchorMin = new Vector2(0f, 0.92f);
-		hlRt.anchorMax = new Vector2(1f, 1f);
-		hlRt.offsetMin = Vector2.zero;
-		hlRt.offsetMax = Vector2.zero;
+		hlRt.anchorMin = new Vector2(0f, 0f);
+		hlRt.anchorMax = new Vector2(0f, 1f);
+		hlRt.pivot = new Vector2(0f, 0.5f);
+		hlRt.anchoredPosition = new Vector2(14f, 0f);
+		hlRt.sizeDelta = new Vector2(54f, 0f);
 
 		var heldArea = CreateEmpty(heldStrip.gameObject, "HeldDiceArea");
 		heldArea.anchorMin = new Vector2(0f, 0f);
-		heldArea.anchorMax = new Vector2(1f, 0.92f);
+		heldArea.anchorMax = new Vector2(1f, 1f);
 		heldArea.offsetMin = Vector2.zero;
 		heldArea.offsetMax = Vector2.zero;
 
-		// ── 저장 슬롯: 스프라이트 이미지 5개 세로 배치 ──
+		// ── 저장 슬롯: 각 칸 높이에 맞춘 정사각형 슬롯 5개 ──
 		var heldSlotsRt = CreateEmpty(heldArea.gameObject, "HeldDiceSlots");
 		Stretch(heldSlotsRt);
 		var heldVlg = heldSlotsRt.gameObject.AddComponent<VerticalLayoutGroup>();
-		heldVlg.childAlignment     = TextAnchor.UpperCenter;
-		heldVlg.spacing            = 10f;
-		heldVlg.padding            = new RectOffset(18, 18, 8, 6);
+		heldVlg.childAlignment     = TextAnchor.MiddleCenter;
+		heldVlg.spacing            = 8f;
+		heldVlg.padding            = new RectOffset(0, 0, 0, 0);
 		heldVlg.childControlWidth  = true;
-		heldVlg.childControlHeight = false;
+		heldVlg.childControlHeight = true;
 		heldVlg.childForceExpandWidth  = true;
-		heldVlg.childForceExpandHeight = false;
+		heldVlg.childForceExpandHeight = true;
 
 		var heldSlotImages = new Image[5];
+		var heldSlotButtons = new Button[5];
 		for (int s = 0; s < 5; s++)
 		{
-			var slotRt  = CreateImage(heldSlotsRt.gameObject, $"HeldSlot{s}", Color.white);
-			var slotImg = slotRt.GetComponent<Image>();
-			slotImg.preserveAspect  = true;
-			slotImg.raycastTarget   = true;
-			slotImg.enabled         = false;
-			var slotArf = slotRt.gameObject.AddComponent<AspectRatioFitter>();
-			slotArf.aspectMode  = AspectRatioFitter.AspectMode.WidthControlsHeight;
-			slotArf.aspectRatio = 1f;
+			var slotCellRt = CreateEmpty(heldSlotsRt.gameObject, $"HeldSlotCell{s}");
+			var cellLayout = slotCellRt.gameObject.AddComponent<LayoutElement>();
+			cellLayout.minHeight = 48f;
+
+			var slotRt = CreateImage(slotCellRt.gameObject, $"HeldSlot{s}",
+				new Color(1f, 1f, 1f, 0f));
+			slotRt.anchorMin = new Vector2(0.5f, 0f);
+			slotRt.anchorMax = new Vector2(0.5f, 1f);
+			slotRt.pivot = new Vector2(0.5f, 0.5f);
+			slotRt.anchoredPosition = Vector2.zero;
+			slotRt.sizeDelta = Vector2.zero;
+			var slotAspect = slotRt.gameObject.AddComponent<AspectRatioFitter>();
+			slotAspect.aspectMode = AspectRatioFitter.AspectMode.HeightControlsWidth;
+			slotAspect.aspectRatio = 1f;
+			var slotBg = slotRt.GetComponent<Image>();
+			slotBg.raycastTarget = true;
+
 			var slotBtn = slotRt.gameObject.AddComponent<Button>();
-			slotBtn.targetGraphic = slotImg;
+			slotBtn.targetGraphic = slotBg;
 			var cb = slotBtn.colors;
-			cb.normalColor      = Color.white;
-			cb.highlightedColor = Color.white;
-			cb.pressedColor     = new Color(0.7f, 0.7f, 0.7f, 1f);
+			cb.normalColor      = new Color(1f, 1f, 1f, 0f);
+			cb.highlightedColor = new Color(1f, 0.84f, 0.32f, 0.18f);
+			cb.pressedColor     = new Color(0.85f, 0.55f, 0.16f, 0.25f);
+			cb.selectedColor    = cb.highlightedColor;
 			slotBtn.colors = cb;
+
+			var iconRt = CreateImage(slotRt.gameObject, "DiceIcon", Color.white);
+			iconRt.anchorMin = Vector2.zero;
+			iconRt.anchorMax = Vector2.one;
+			iconRt.pivot = new Vector2(0.5f, 0.5f);
+			iconRt.offsetMin = new Vector2(5f, 5f);
+			iconRt.offsetMax = new Vector2(-5f, -5f);
+			var slotImg = iconRt.GetComponent<Image>();
+			slotImg.preserveAspect = true;
+			slotImg.raycastTarget  = false;
+			slotImg.enabled        = false;
+
 			var hover = slotRt.gameObject.AddComponent<UIHoverEffect>();
 			SetField(hover, "targetImage", slotImg);
 			SetField(hover, "fontSizeBoost", 0f);
-			SetField(hover, "scaleFactor", 1.08f);
+			SetField(hover, "scaleFactor", 1.04f);
 			SetField(hover, "transitionDuration", 0.1f);
 			SetField(hover, "outlineColor", new Color(1f, 0.85f, 0.3f, 0.9f));
 			SetField(hover, "outlineDistance", new Vector2(2f, 2f));
 			SetField(hover, "shadowColor", new Color(0f, 0f, 0f, 0.35f));
 			SetField(hover, "shadowDistance", new Vector2(3f, -3f));
 			heldSlotImages[s] = slotImg;
+			heldSlotButtons[s] = slotBtn;
 		}
 
-		// ── 주사위 굴림 뷰포트 (우측, 전체 높이) ──
+		// ── 주사위 굴림 뷰포트 (트레이 우측 큰 칸) ──
 		var vpArea = CreateEmpty(dicePanel.gameObject, "DiceViewportArea");
-		vpArea.anchorMin = new Vector2(heldStripWidth + 0.01f, 0f);
-		vpArea.anchorMax = new Vector2(1f, 1f);
+		// Dice_Tray.png 1440x720 기준 큰 주사위칸의 내부 바닥 영역.
+		vpArea.anchorMin = new Vector2(360f / 1440f, 128f / 720f);
+		vpArea.anchorMax = new Vector2(1328f / 1440f, 624f / 720f);
 		vpArea.offsetMin = Vector2.zero;
 		vpArea.offsetMax = Vector2.zero;
 
 		var vpContainer = CreateEmpty(vpArea.gameObject, "DiceViewportContainer");
 		Stretch(vpContainer);
-		var vpAspect = vpContainer.gameObject.AddComponent<AspectRatioFitter>();
-		vpAspect.aspectMode = AspectRatioFitter.AspectMode.FitInParent;
-		vpAspect.aspectRatio = 960f / 540f;
 
 		var vpGo = new GameObject("DiceViewport");
 		vpGo.transform.SetParent(vpContainer, false);
@@ -591,7 +388,8 @@ public static class DiceBattleSceneBuilder
 
 		// ── 적 주사위 물리 환경 (Z=100 오프셋) ──
 		var enemyDiceCenter = new Vector3(0, 0, 100);
-		BuildEnemyDiceArena(diceLayer, bouncyMat, wallMat, enemyDiceCenter);
+		var enemyDiceVaultCenter = enemyDiceCenter + new Vector3(0, dieRadius, 0);
+		BuildEnemyDiceArena(diceLayer, bouncyMat, wallMat, enemyDiceCenter, defaultEnemyDiceProfile);
 
 		// 적 주사위 RenderTexture
 		var enemyRenderTex = EnsureRenderTexture(
@@ -602,23 +400,29 @@ public static class DiceBattleSceneBuilder
 		var enemyDiceCam = enemyDiceCamGo.AddComponent<Camera>();
 		enemyDiceCam.clearFlags = CameraClearFlags.SolidColor;
 		enemyDiceCam.backgroundColor = new Color(0f, 0f, 0f, 0f);
-		enemyDiceCam.fieldOfView = 42;
 		enemyDiceCam.cullingMask = 1 << diceLayer;
 		enemyDiceCam.targetTexture = enemyRenderTex;
-		enemyDiceCamGo.transform.position = enemyDiceCenter + new Vector3(0, 6, -3);
-		enemyDiceCamGo.transform.rotation = Quaternion.Euler(55, 0, 0);
+		enemyDiceCam.orthographic = defaultEnemyDiceProfile.cameraOrthographic;
+		enemyDiceCam.orthographicSize = defaultEnemyDiceProfile.cameraOrthographicSize;
+		enemyDiceCam.fieldOfView = defaultEnemyDiceProfile.cameraFieldOfView;
+		enemyDiceCamGo.transform.position = enemyDiceVaultCenter + defaultEnemyDiceProfile.cameraOffset;
+		enemyDiceCamGo.transform.rotation = Quaternion.Euler(defaultEnemyDiceProfile.cameraEulerAngles);
 
 		// 적 주사위 5개
 		var enemyDiceArr = CreateDiceSet("EnemyDie", enemyDiceCenter, diceLayer,
-			bouncyMat, outlineMat, dicePrefab, dieRadius);
+			bouncyMat, outlineMat, dicePrefab, dieRadius, defaultEnemyDiceProfile.diceScale);
 
 		// EnemyDiceRoller 컴포넌트
 		var enemyRollerGo = new GameObject("EnemyDiceRoller");
 		var enemyRoller = enemyRollerGo.AddComponent<EnemyDiceRoller>();
 		SetField(enemyRoller, "enemyDice", enemyDiceArr);
-		SetField(enemyRoller, "vaultCenter", enemyDiceCenter + new Vector3(0, 0.25f, 0));
+		SetField(enemyRoller, "vaultCenter", enemyDiceVaultCenter);
+		SetField(enemyRoller, "diceCamera", enemyDiceCam);
+		SetField(enemyRoller, "profileCatalog", enemyDiceProfileCatalog);
+		SetField(enemyRoller, "slimeJellyMaterial", slimeJellyMaterial);
+		SetField(enemyRoller, "diceSpacing", defaultEnemyDiceProfile.diceSpacing);
 
-		// ── 적 주사위 UI 오버레이 (작은 RawImage — RenderTexture를 몹 앞으로 이동) ──
+		// ── 적 주사위 UI 오버레이 (몹 머리 위 배경 패널 + RenderTexture) ──
 		// 레거시 팝업 placeholder (BattleSceneController의 enemyDicePopup 필드 호환용)
 		var enemyDicePopupGo = CreateEmpty(canvasGo, "EnemyDicePopup");
 		enemyDicePopupGo.anchorMin = Vector2.zero;
@@ -626,12 +430,20 @@ public static class DiceBattleSceneBuilder
 		enemyDicePopupGo.sizeDelta = Vector2.zero;
 		enemyDicePopupGo.gameObject.SetActive(false);
 
-		// 실제 비행 오버레이 — 런타임에 RectTransform.position을 직접 조작
+		// 실제 주사위 오버레이 — 런타임에 몹 머리 위로 배치
 		var enemyDiceOverlayGo = CreateEmpty(canvasGo, "EnemyDiceOverlay");
 		enemyDiceOverlayGo.anchorMin = new Vector2(0.5f, 0.5f);
 		enemyDiceOverlayGo.anchorMax = new Vector2(0.5f, 0.5f);
 		enemyDiceOverlayGo.pivot     = new Vector2(0.5f, 0.5f);
-		enemyDiceOverlayGo.sizeDelta = new Vector2(640f, 360f); // 16:9 (RenderTex 비율, 2배 확대)
+		float enemyDiceOverlayHeight = defaultEnemyDiceProfile.overlayMaxHeight;
+		float enemyDiceOverlayWidth = enemyDiceOverlayHeight * defaultEnemyDiceProfile.overlayAspect;
+		enemyDiceOverlayGo.sizeDelta = new Vector2(enemyDiceOverlayWidth, enemyDiceOverlayHeight);
+		var overlayBg = enemyDiceOverlayGo.gameObject.AddComponent<Image>();
+		overlayBg.color = new Color(0.10f, 0.18f, 0.32f, 0.92f);
+		overlayBg.raycastTarget = false;
+		var overlayOutline = enemyDiceOverlayGo.gameObject.AddComponent<Outline>();
+		overlayOutline.effectColor = new Color(0.35f, 0.62f, 1f, 0.65f);
+		overlayOutline.effectDistance = new Vector2(2f, -2f);
 
 		var overlayRawGo = new GameObject("EnemyDiceRawImage");
 		overlayRawGo.transform.SetParent(enemyDiceOverlayGo, false);
@@ -639,15 +451,16 @@ public static class DiceBattleSceneBuilder
 		overlayRaw.texture = enemyRenderTex;
 		overlayRaw.raycastTarget = false;
 		var overlayRawRt = overlayRawGo.GetComponent<RectTransform>();
-		Stretch(overlayRawRt);
+		overlayRawRt.anchorMin = Vector2.zero;
+		overlayRawRt.anchorMax = Vector2.one;
+		overlayRawRt.offsetMin = Vector2.zero;
+		overlayRawRt.offsetMax = Vector2.zero;
 
 		enemyDiceOverlayGo.gameObject.SetActive(false);
 
 
 		// ── EventSystem ──
-		var es = new GameObject("EventSystem");
-		es.AddComponent<UnityEngine.EventSystems.EventSystem>();
-		es.AddComponent<UnityEngine.InputSystem.UI.InputSystemUIInputModule>();
+		SceneBuilderUtility.BuildEventSystem();
 
 		// ── DiceViewportInteraction ──
 		var dviGo = new GameObject("DiceViewportInteraction");
@@ -656,37 +469,11 @@ public static class DiceBattleSceneBuilder
 		SetField(dvi, "diceCamera", diceCam);
 		SetField(dvi, "diceLayerIndex", diceLayer);
 
-		// ── BattleDamageVFX ──
-		var root = new GameObject("BattleRoot");
-		var vfxComp = root.AddComponent<BattleDamageVFX>();
-		SetField(vfxComp, "damageSpawnParent", dmgSpawn);
-		SetField(vfxComp, "enemyPanels", enemyPanels);
-
-		// ── BattleAnimations (피격 점멸, 돌진 등 재사용 애니메이션) ──
-		var battleAnimsComp = root.AddComponent<BattleAnimations>();
-
-		// ── BattleSceneController ──
-		var ctrl = root.AddComponent<BattleSceneController>();
-
-		SetField(ctrl, "enemyPanels", enemyPanels);
-		SetField(ctrl, "enemyBodies", enemyBodies);
-		SetField(ctrl, "enemyAnimators", enemyAnimators);
-		SetField(ctrl, "enemyNames", enemyNameTexts);
-		SetField(ctrl, "enemyHpFills", enemyHpFillArr);
-		SetField(ctrl, "enemyHpTexts", enemyHpTextArr);
-		SetField(ctrl, "targetMarkers", targetMarkers);
-		SetField(ctrl, "deadOverlays", deadOverlays);
-
-		// 스테이지 번들 주입 — 디버그 씬 직접 로딩 시 GenerateDefaultEnemies / 런타임 배경 교체에 사용
-		SetField(ctrl, "stageBundles", stageBundles);
-		SetField(ctrl, "fightBackgroundImage", fightBgImageComp);
-
-		SetField(ctrl, "vfx", vfxComp);
-		SetField(ctrl, "battleLog", battleLogComp);
-		SetField(ctrl, "bottomFocus", bottomFocusHandles.focus);
-		SetField(ctrl, "battleAnims", battleAnimsComp);
-		SetField(ctrl, "playerBody", playerImg);
-		SetField(ctrl, "playerBodyAnimator", bodyAnim);
+		var battleRoot = SceneBuilderUtility.BuildBattleRootBase<BattleSceneController>(
+			fightBackground, stageBundles, playerRig, enemySlots, GroundY,
+			heartDisplayComp, battleLogComp, bottomFocusHandles.focus, dmgSpawn);
+		var root = battleRoot.root;
+		var ctrl = battleRoot.controller;
 		var rollBtnComp = rollBtn.GetComponent<Button>();
 		var confirmBtnComp = confirmBtn.GetComponent<Button>();
 		var cancelBtnComp = cancelBtn.GetComponent<Button>();
@@ -704,22 +491,23 @@ public static class DiceBattleSceneBuilder
 		SetField(diceDirector, "viewportInteraction", dvi);
 		SetField(diceDirector, "rollButton", rollBtnComp);
 		SetField(diceDirector, "vaultCenter", VaultCenter + new Vector3(0, 0.25f, 0));
-		// 주사위 row 슬롯 레이아웃 — 비홀드 주사위는 slotCenter 기준 slotSpacing 간격으로 대칭 배치.
-		// slotCenter.y는 base(non-elevated) 값 — Dice.BeginSpin이 spin 높이 offset을 추가한다.
-		// slotCenter.z는 DiceCamera(top-down, Euler 90°) 화면 수직 좌표. 카메라 중심 z=1.2와 동일하게 맞춰 화면 중앙 정렬.
-		SetField(diceDirector, "slotCenter", new Vector3(0f, dieRadius, 1.2f));
-		SetField(diceDirector, "slotSpacing", 1.4f);
+		// 주사위 슬롯 레이아웃 — 5개는 위 3개/아래 2개 그리드, 그 외는 한 줄 대칭 배치.
+		// slotCenter.y는 base(non-elevated) 값 — Dice.BeginPhysicalRoll이 launch 높이를 추가한다.
+		// slotCenter.z는 DiceCamera(top-down, Euler 90°) 화면 수직 좌표. 카메라 중심 z와 동일하게 맞춰 화면 중앙 정렬.
+		SetField(diceDirector, "slotCenter", new Vector3(0f, dieRadius, DiceSlotCenterZ));
+		SetField(diceDirector, "slotSpacing", 1.05f);
+		SetField(diceDirector, "slotRowSpacing", 1.05f);
 		SetField(diceDirector, "heldDiceImages", heldSlotImages);
 		SetField(diceDirector, "diceFaceSprites", diceFaceSprites);
 		SetField(ctrl, "diceDirector", diceDirector);
 
 		// 저장 슬롯 unhold 버튼 연결
 		{
-			var btn0 = heldSlotImages[0].GetComponent<Button>();
-			var btn1 = heldSlotImages[1].GetComponent<Button>();
-			var btn2 = heldSlotImages[2].GetComponent<Button>();
-			var btn3 = heldSlotImages[3].GetComponent<Button>();
-			var btn4 = heldSlotImages[4].GetComponent<Button>();
+			var btn0 = heldSlotButtons[0];
+			var btn1 = heldSlotButtons[1];
+			var btn2 = heldSlotButtons[2];
+			var btn3 = heldSlotButtons[3];
+			var btn4 = heldSlotButtons[4];
 			if (btn0 != null) UnityEventTools.AddPersistentListener(btn0.onClick, diceDirector.UnholdSlot0);
 			if (btn1 != null) UnityEventTools.AddPersistentListener(btn1.onClick, diceDirector.UnholdSlot1);
 			if (btn2 != null) UnityEventTools.AddPersistentListener(btn2.onClick, diceDirector.UnholdSlot2);
@@ -732,11 +520,7 @@ public static class DiceBattleSceneBuilder
 		UnityEventTools.AddPersistentListener(confirmBtnComp.onClick, ctrl.ConfirmScore);
 		UnityEventTools.AddPersistentListener(cancelBtnComp.onClick, ctrl.CancelBattle);
 		UnityEventTools.AddPersistentListener(nextRoundBtnComp.onClick, ctrl.NextRound);
-		UnityEventTools.AddPersistentListener(enemyPanelButtons[0].onClick, ctrl.OnEnemyPanel0Clicked);
-		UnityEventTools.AddPersistentListener(enemyPanelButtons[1].onClick, ctrl.OnEnemyPanel1Clicked);
-		UnityEventTools.AddPersistentListener(enemyPanelButtons[2].onClick, ctrl.OnEnemyPanel2Clicked);
-		UnityEventTools.AddPersistentListener(enemyPanelButtons[3].onClick, ctrl.OnEnemyPanel3Clicked);
-		SetField(ctrl, "heartDisplay", heartDisplayComp);
+		SceneBuilderUtility.BindBattleEnemyPanelButtons(ctrl, enemySlots.buttons);
 		// rollDotsText / damagePreviewText / comboLabel는 BattleHudPresenter로 이동(아래 블록).
 		// enemyDice*, jumpAnimator는 EnemyCounterAttackDirector로 이동(아래 블록).
 
@@ -747,15 +531,10 @@ public static class DiceBattleSceneBuilder
 		SetField(deathAnimComp, "frameRate", SceneBuilderUtility.BattlePlayerActionFrameRate);
 
 		// 사망 스프라이트 로드 (0~144)
-		const int deathFrameCount = 145;
-		Sprite[] deathSprites = new Sprite[deathFrameCount];
-		for (int f = 0; f < deathFrameCount; f++)
-		{
-			string framePath = $"Assets/Player/DieSprites/{f}.png";
-			EnsurePixelSprite(framePath);
-			deathSprites[f] = AssetDatabase.LoadAssetAtPath<Sprite>(framePath);
-		}
+		Sprite[] deathSprites = SceneBuilderUtility.LoadNumberedPixelSprites(
+			SceneBuilderUtility.PlayerDieSpriteFolder, "", "png", SceneBuilderUtility.BattlePlayerDeathFrameCount);
 		SetField(deathAnimComp, "deathSprites", deathSprites);
+		SetField(bodyAnim, "deathDisplaySprites", deathSprites);
 
 		// 화면 어두워짐용 Dimmer (최상위 — 모든 UI 위에)
 		var deathDimmer = SceneBuilderUtility.CreateDimmer(canvasGo.transform, "DeathDimmer");
@@ -764,57 +543,22 @@ public static class DiceBattleSceneBuilder
 
 		SetField(ctrl, "deathAnimator", deathAnimComp);
 
-		// ── 플레이어 주사위 굴림 애니메이션 ──
-		var rollAnimComp = root.AddComponent<PlayerRollAnimator>();
-		SetField(rollAnimComp, "playerBody", playerImg);
-		SetField(rollAnimComp, "bodyAnimator", bodyAnim);
-		SetField(rollAnimComp, "bodyScaleMultiplier", DiceRollSpriteScaleMultiplier);
-		SetField(rollAnimComp, "frameRate", SceneBuilderUtility.BattlePlayerActionFrameRate);
-
-		const int rollFrameCount = 145;
-		Sprite[] rollSprites = new Sprite[rollFrameCount];
-		for (int f = 0; f < rollFrameCount; f++)
-		{
-			string framePath = $"Assets/Player/DiceRollSprites/{f}.png";
-			EnsurePixelSprite(framePath);
-			rollSprites[f] = AssetDatabase.LoadAssetAtPath<Sprite>(framePath);
-		}
-		SetField(rollAnimComp, "rollSprites", rollSprites);
-
-		SetField(ctrl, "rollAnimator", rollAnimComp);
-
 		// ── 플레이어 공격 애니메이션 ──
-		EnsureTightSprite("Assets/Player/Player_Weapon_transparent.png");
-		var weaponProjectile = CreateImage(canvasGo, "PlayerWeaponProjectile", Color.white);
-		weaponProjectile.anchorMin = new Vector2(0.5f, 0.5f);
-		weaponProjectile.anchorMax = new Vector2(0.5f, 0.5f);
-		weaponProjectile.pivot = new Vector2(0.5f, 0.5f);
-		weaponProjectile.sizeDelta = new Vector2(84f, 84f);
-		var weaponProjectileImg = weaponProjectile.GetComponent<Image>();
-		weaponProjectileImg.sprite = AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Player/Player_Weapon_transparent.png");
-		weaponProjectileImg.preserveAspect = true;
-		weaponProjectileImg.raycastTarget = false;
-		weaponProjectile.gameObject.SetActive(false);
-
-		var attackAnimComp = root.AddComponent<PlayerAttackAnimator>();
-		SetField(attackAnimComp, "playerBody", playerImg);
-		SetField(attackAnimComp, "weaponProjectile", weaponProjectileImg);
-		SetField(attackAnimComp, "bodyAnimator", bodyAnim);
-		SetField(attackAnimComp, "frameRate", 22.5f);
-		SetField(attackAnimComp, "frameStep", 2);
-
-		Sprite[] attackSprites = LoadAvailablePlayerSpriteFrames(
-			"Assets/Player/AttackSprites/Attack_01_transparent");
-		SetField(attackAnimComp, "attackSprites", attackSprites);
-
+		var weaponProjectileImg = SceneBuilderUtility.CreatePlayerWeaponProjectileImage(canvasGo.transform);
+		var attackAnimComp = SceneBuilderUtility.AddPlayerAttackAnimator(
+			root, playerImg, bodyAnim, weaponProjectileImg);
 		SetField(ctrl, "attackAnimator", attackAnimComp);
+
+		var enemyProjectileImg = SceneBuilderUtility.CreateEnemyProjectileImage(
+			canvasGo.transform,
+			"EnemyProjectile",
+			"Assets/Mobs/Sprites/Skeleton/Projectile/Skeleton_Arrow_transparent.png");
 
 		// ── 플레이어 점프(회피) 애니메이션 + 발밑 효과 ──
 		var jumpAnimComp = root.AddComponent<PlayerJumpAnimator>();
 		SetField(jumpAnimComp, "playerBody", playerImg);
 		SetField(jumpAnimComp, "belowEffect", jumpBelowImg);
 		SetField(jumpAnimComp, "bodyAnimator", bodyAnim);
-		SetField(jumpAnimComp, "jumpSprites", jumpSprites);
 		SetField(jumpAnimComp, "belowSprites", jumpBelowSprites);
 		SetField(jumpAnimComp, "jumpDuration", SceneBuilderUtility.BattlePlayerJumpDuration);
 
@@ -829,18 +573,19 @@ public static class DiceBattleSceneBuilder
 
 		// ── EnemyCounterAttackDirector: 적 반격 시퀀스 + 방어 페이즈 상태 ──
 		var counterAttackDir = root.AddComponent<EnemyCounterAttackDirector>();
+		var attackProjectileVfx = root.AddComponent<EnemyAttackProjectileVfx>();
+		SetField(attackProjectileVfx, "vfxParent", canvasGo.transform);
 		SetField(counterAttackDir, "enemyDiceRoller", enemyRoller);
 		SetField(counterAttackDir, "enemyDicePopup", enemyDicePopupGo.gameObject);
 		SetField(counterAttackDir, "enemyDiceOverlay", enemyDiceOverlayGo);
 		SetField(counterAttackDir, "enemyDiceResultTexts", enemyDiceResultTexts);
-		SetField(counterAttackDir, "enemyDiceFaceContainers", enemyDiceFaceContainers);
-		SetField(counterAttackDir, "diceFaceSprites", diceFaceSprites);
 		SetField(counterAttackDir, "jumpAnimator", jumpAnimComp);
+		SetField(counterAttackDir, "enemyProjectile", enemyProjectileImg);
+		SetField(counterAttackDir, "attackProjectileVfx", attackProjectileVfx);
 		SetField(ctrl, "counterAttackDirector", counterAttackDir);
 
 		// ── 디버그 콘솔 ──
-		var debugGo = new GameObject("DebugConsole");
-		debugGo.AddComponent<DebugConsoleController>();
+		SceneBuilderUtility.BuildDebugConsole();
 
 		// ── 오디오 매니저 ─────────────────────────────────────────
 		SceneBuilderUtility.BuildAudioManager(new[]
@@ -854,33 +599,87 @@ public static class DiceBattleSceneBuilder
 		}, includeDrumRoll: true);
 
 		// ── 씬 저장 ──
-		string scenePath = "Assets/Scenes/DiceBattleScene.unity";
-		EnsureDirectory("Assets/Scenes");
-		EditorSceneManager.SaveScene(scene, scenePath);
-		AddSceneToBuildSettings(scenePath);
-		EditorUtility.DisplayDialog("씬 빌더", "DiceBattleScene 생성 완료!", "확인");
+		return SceneBuilderUtility.SaveSceneAndShowDialog(scene,
+			"Assets/Scenes/DiceBattleScene.unity",
+			"DiceBattleScene 생성 완료!",
+			showDialog: showCompletionDialog);
 	}
 
 	// ── 물리 환경 ──
 
 	static void BuildPhysicsEnvironment(int layer, PhysicsMaterial floorMat, PhysicsMaterial wallMat)
 	{
-		// DiceCamera(0,6,-3), 55° 하방, FOV 42° → 바닥(Y=0) 가시 범위: X ≈ ±5, Z ≈ -1.5 ~ 5.9
-		// 물리 공간을 가시 영역에 맞춰 배치 (중심 Z=2)
-		BuildPhysicsBox6("", new Vector3(0, 0, 2f), 8f, 6f, 8f, layer, floorMat, wallMat);
+		// DiceCamera가 보는 큰 주사위칸 내부 바닥 영역과 물리 벽 위치를 일치시킨다.
+		BuildPhysicsBox6("", new Vector3(0, 0, DiceSlotCenterZ),
+			DiceArenaWidth, DiceArenaDepth, 30f, layer, floorMat, wallMat);
 	}
 
 	static readonly Vector3 VaultCenter = new Vector3(0, 0, 50);
 
 	static void BuildVault(int layer, PhysicsMaterial floorMat, PhysicsMaterial wallMat)
 	{
-		BuildPhysicsBox6("Vault", VaultCenter, 8f, 4f, 6f, layer, floorMat, wallMat);
+		BuildPhysicsBox6("Vault", VaultCenter, 8f, 4f, 30f, layer, floorMat, wallMat);
 	}
 
-	static void BuildEnemyDiceArena(int layer, PhysicsMaterial floorMat, PhysicsMaterial wallMat, Vector3 center)
+	static void BuildEnemyDiceArena(int layer, PhysicsMaterial floorMat, PhysicsMaterial wallMat,
+		Vector3 center, EnemyDiceProfile profile)
 	{
-		BuildPhysicsBox6("EnemyDice", new Vector3(center.x, center.y, center.z + 2f),
-			8f, 6f, 8f, layer, floorMat, wallMat);
+		Vector3 arenaSize = profile != null ? profile.arenaSize : EnemyDiceProfile.DefaultArenaSize;
+		BuildPhysicsBox6("EnemyDice", center,
+			arenaSize.x, arenaSize.z, arenaSize.y, layer, floorMat, wallMat);
+	}
+
+	static void NormalizeEnemyDiceProfiles(EnemyDiceProfile defaultProfile, EnemyDiceProfileCatalog catalog)
+	{
+		defaultProfile?.NormalizeSafetySizing();
+		if (catalog?.Profiles != null)
+		{
+			for (int i = 0; i < catalog.Profiles.Length; i++)
+				catalog.Profiles[i]?.NormalizeSafetySizing();
+		}
+
+		Vector3 arenaSize = ResolveEnemyDiceArenaSize(defaultProfile, catalog);
+		ApplyEnemyDiceArenaSize(defaultProfile, arenaSize);
+		if (catalog?.Profiles == null)
+			return;
+
+		for (int i = 0; i < catalog.Profiles.Length; i++)
+			ApplyEnemyDiceArenaSize(catalog.Profiles[i], arenaSize);
+	}
+
+	static Vector3 ResolveEnemyDiceArenaSize(EnemyDiceProfile defaultProfile, EnemyDiceProfileCatalog catalog)
+	{
+		Vector3 arenaSize = defaultProfile != null
+			? defaultProfile.arenaSize
+			: EnemyDiceProfile.DefaultArenaSize;
+
+		if (catalog?.Profiles == null)
+			return arenaSize;
+
+		for (int i = 0; i < catalog.Profiles.Length; i++)
+		{
+			var profile = catalog.Profiles[i];
+			if (profile == null)
+				continue;
+
+			arenaSize = new Vector3(
+				Mathf.Max(arenaSize.x, profile.arenaSize.x),
+				Mathf.Max(arenaSize.y, profile.arenaSize.y),
+				Mathf.Max(arenaSize.z, profile.arenaSize.z));
+		}
+
+		return arenaSize;
+	}
+
+	static void ApplyEnemyDiceArenaSize(EnemyDiceProfile profile, Vector3 arenaSize)
+	{
+		if (profile == null)
+			return;
+
+		profile.arenaSize = arenaSize;
+		profile.cameraOrthographicSize = Mathf.Max(
+			profile.cameraOrthographicSize,
+			EnemyDiceProfile.ComputeCameraOrthographicSize(arenaSize));
 	}
 
 	/// <summary>바닥+천장+좌우벽+전후벽 6면 물리 박스를 일괄 생성.</summary>
@@ -1025,59 +824,9 @@ public static class DiceBattleSceneBuilder
 
 	static void EnsureDirectory(string path) => SceneBuilderUtility.EnsureDirectory(path);
 
-	static void AddSceneToBuildSettings(string scenePath)
-		=> SceneBuilderUtility.AddSceneToBuildSettings(scenePath);
-
 	static void EnsurePixelSprite(string path) => SceneBuilderUtility.EnsurePixelSprite(path);
 
 	static void EnsureTightSprite(string path) => SceneBuilderUtility.EnsureTightSprite(path);
-
-	/// <summary>플레이어 프레임 스프라이트 폴더에서 0..count-1 순서로 로드. 픽셀아트 임포트 보장.</summary>
-	static Sprite[] LoadPlayerSpriteFrames(string folder, int count)
-	{
-		var arr = new Sprite[count];
-		for (int i = 0; i < count; i++)
-		{
-			string p = $"{folder}/{i}.png";
-			EnsurePixelSprite(p);
-			arr[i] = AssetDatabase.LoadAssetAtPath<Sprite>(p);
-			if (arr[i] == null)
-				Debug.LogWarning($"[DiceBattleSceneBuilder] 프레임 로드 실패: {p}");
-		}
-		return arr;
-	}
-
-	/// <summary>폴더에 존재하는 숫자 파일명 PNG를 모두 숫자 순서로 로드. 프레임 수가 바뀌는 애니메이션용.</summary>
-	static Sprite[] LoadAvailablePlayerSpriteFrames(string folder)
-	{
-		if (!System.IO.Directory.Exists(folder))
-		{
-			Debug.LogWarning($"[DiceBattleSceneBuilder] 프레임 폴더 없음: {folder}");
-			return new Sprite[0];
-		}
-
-		var paths = System.IO.Directory.GetFiles(folder, "*.png");
-		System.Array.Sort(paths, (a, b) => ExtractFrameIndex(a).CompareTo(ExtractFrameIndex(b)));
-
-		var sprites = new System.Collections.Generic.List<Sprite>(paths.Length);
-		foreach (var path in paths)
-		{
-			string assetPath = path.Replace("\\", "/");
-			EnsurePixelSprite(assetPath);
-			var sprite = AssetDatabase.LoadAssetAtPath<Sprite>(assetPath);
-			if (sprite != null)
-				sprites.Add(sprite);
-			else
-				Debug.LogWarning($"[DiceBattleSceneBuilder] 프레임 로드 실패: {assetPath}");
-		}
-		return sprites.ToArray();
-	}
-
-	static int ExtractFrameIndex(string path)
-	{
-		string name = System.IO.Path.GetFileNameWithoutExtension(path);
-		return int.TryParse(name, out int index) ? index : int.MaxValue;
-	}
 
 	/// <summary>에셋을 삭제 후 새로 생성. 빌드할 때마다 최신 값이 보장된다.</summary>
 	static T RecreateAsset<T>(string path, T asset) where T : Object
@@ -1099,14 +848,256 @@ public static class DiceBattleSceneBuilder
 		return RecreateAsset(path, rt);
 	}
 
+	static Material EnsureSlimeJellyMaterial()
+	{
+		const string materialPath = "Assets/Materials/SlimeDiceJelly.mat";
+		const string shaderName = "Capstone/Slime Dice Jelly";
+		var material = AssetDatabase.LoadAssetAtPath<Material>(materialPath);
+		var shader = Shader.Find(shaderName);
+		if (shader == null)
+		{
+			Debug.LogWarning($"[DiceBattleSceneBuilder] 셰이더 로드 실패: {shaderName}");
+			return material;
+		}
+
+		if (material == null)
+		{
+			material = new Material(shader)
+			{
+				name = "SlimeDiceJelly"
+			};
+			material.SetColor("_BaseColor", new Color(0.48f, 1.00f, 0.18f, 0.46f));
+			AssetDatabase.CreateAsset(material, materialPath);
+		}
+		else if (material.shader != shader)
+		{
+			material.shader = shader;
+			EditorUtility.SetDirty(material);
+		}
+		return material;
+	}
+
+	static EnemyDiceProfileCatalog CreateEnemyDiceProfileCatalog(GameObject dicePrefab)
+	{
+		var catalog = EnemyDiceProfileCatalog.CreateDefault(dicePrefab);
+		AssignEnemyDiceAtlas(catalog, EnemyDiceProfile.SlimeId, "slime");
+		AssignEnemyDiceAtlas(catalog, EnemyDiceProfile.SkeletonId, "skeleton");
+		AssignEnemyDiceAtlas(catalog, EnemyDiceProfile.BatId, "bat");
+		AssignEnemyDiceAtlas(catalog, EnemyDiceProfile.GoblinId, "goblin");
+		AssignEnemyDiceAtlas(catalog, EnemyDiceProfile.DraculaId, "dracula");
+		return catalog;
+	}
+
+	static void AssignEnemyDiceAtlas(EnemyDiceProfileCatalog catalog, string profileId, string enemyKey)
+	{
+		var profile = catalog != null ? catalog.Resolve(profileId) : null;
+		if (profile == null)
+			return;
+
+		string targetPath = $"Assets/Dices/EnemyStyles/{ToTitleCase(enemyKey)}/{enemyKey}_d6_atlas.png";
+		EnsureEnemyDiceAtlasAsset(enemyKey, targetPath);
+		profile.faceAtlasTexture = AssetDatabase.LoadAssetAtPath<Texture2D>(targetPath);
+		if (profile.faceAtlasTexture == null)
+			Debug.LogWarning($"[DiceBattleSceneBuilder] 적 주사위 atlas 로드 실패: {targetPath}");
+	}
+
+	static void EnsureEnemyDiceAtlasAsset(string enemyKey, string targetPath)
+	{
+		string sourcePath = $"SpritePipelineWork/enemy_dice_{enemyKey}/sprite_sheets/{enemyKey}_dice_faces_sheet.png";
+		if (!System.IO.File.Exists(sourcePath))
+		{
+			Debug.LogWarning($"[DiceBattleSceneBuilder] 적 주사위 face sheet 없음: {sourcePath}");
+			return;
+		}
+
+		string targetDirectory = System.IO.Path.GetDirectoryName(targetPath)?.Replace('\\', '/');
+		if (!string.IsNullOrEmpty(targetDirectory))
+			EnsureDirectory(targetDirectory);
+
+		bool shouldRegenerate = !System.IO.File.Exists(targetPath)
+			|| System.IO.File.GetLastWriteTimeUtc(sourcePath) > System.IO.File.GetLastWriteTimeUtc(targetPath);
+		if (shouldRegenerate)
+			WriteCleanEnemyDiceAtlas(sourcePath, targetPath);
+
+		ConfigureEnemyDiceAtlasImporter(targetPath);
+	}
+
+	static void WriteCleanEnemyDiceAtlas(string sourcePath, string targetPath)
+	{
+		var source = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+		Texture2D atlas = null;
+		try
+		{
+			if (!source.LoadImage(System.IO.File.ReadAllBytes(sourcePath)))
+			{
+				Debug.LogWarning($"[DiceBattleSceneBuilder] 적 주사위 face sheet 디코드 실패: {sourcePath}");
+				return;
+			}
+
+			atlas = CreateCleanEnemyDiceFaceAtlas(source);
+			System.IO.File.WriteAllBytes(targetPath, atlas.EncodeToPNG());
+			AssetDatabase.ImportAsset(targetPath, ImportAssetOptions.ForceUpdate);
+		}
+		finally
+		{
+			if (atlas != null)
+				Object.DestroyImmediate(atlas);
+			Object.DestroyImmediate(source);
+		}
+	}
+
+	static void ConfigureEnemyDiceAtlasImporter(string path)
+	{
+		AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
+		var importer = AssetImporter.GetAtPath(path) as TextureImporter;
+		if (importer == null)
+			return;
+
+		bool dirty = false;
+		if (importer.textureType != TextureImporterType.Default)
+		{
+			importer.textureType = TextureImporterType.Default;
+			dirty = true;
+		}
+		if (!importer.sRGBTexture)
+		{
+			importer.sRGBTexture = true;
+			dirty = true;
+		}
+		if (importer.mipmapEnabled)
+		{
+			importer.mipmapEnabled = false;
+			dirty = true;
+		}
+		if (importer.isReadable)
+		{
+			importer.isReadable = false;
+			dirty = true;
+		}
+		if (importer.filterMode != FilterMode.Bilinear)
+		{
+			importer.filterMode = FilterMode.Bilinear;
+			dirty = true;
+		}
+		if (importer.textureCompression != TextureImporterCompression.Uncompressed)
+		{
+			importer.textureCompression = TextureImporterCompression.Uncompressed;
+			dirty = true;
+		}
+
+		if (dirty)
+			importer.SaveAndReimport();
+	}
+
+	public static Texture2D CreateCleanEnemyDiceFaceAtlas(Texture2D sourceSheet)
+	{
+		if (sourceSheet == null)
+			return null;
+		if (sourceSheet.width % 3 != 0 || sourceSheet.height % 2 != 0)
+			throw new System.ArgumentException("Enemy dice face sheet must be a 3x2 grid.", nameof(sourceSheet));
+
+		int tileWidth = sourceSheet.width / 3;
+		int tileHeight = sourceSheet.height / 2;
+		var atlas = new Texture2D(sourceSheet.width, sourceSheet.height, TextureFormat.RGBA32, false)
+		{
+			name = $"{sourceSheet.name}_clean_atlas",
+			filterMode = FilterMode.Bilinear,
+			wrapMode = TextureWrapMode.Clamp
+		};
+		var transparent = new Color32(0, 0, 0, 0);
+		var clearPixels = new Color32[sourceSheet.width * sourceSheet.height];
+		for (int i = 0; i < clearPixels.Length; i++)
+			clearPixels[i] = transparent;
+		atlas.SetPixels32(clearPixels);
+
+		for (int row = 0; row < 2; row++)
+		for (int col = 0; col < 3; col++)
+		{
+			int sourceX = col * tileWidth;
+			int sourceY = sourceSheet.height - (row + 1) * tileHeight;
+			CopyCleanEnemyDiceTile(sourceSheet, atlas, sourceX, sourceY, tileWidth, tileHeight);
+		}
+
+		atlas.Apply(false, false);
+		return atlas;
+	}
+
+	static void CopyCleanEnemyDiceTile(Texture2D source, Texture2D atlas,
+		int tileX, int tileY, int tileWidth, int tileHeight)
+	{
+		if (!TryFindDiceFaceBounds(source, tileX, tileY, tileWidth, tileHeight, out var bounds))
+			bounds = new RectInt(tileX, tileY, tileWidth, tileHeight);
+
+		for (int y = 0; y < tileHeight; y++)
+		for (int x = 0; x < tileWidth; x++)
+		{
+			float u = tileWidth <= 1 ? 0f : x / (float)(tileWidth - 1);
+			float v = tileHeight <= 1 ? 0f : y / (float)(tileHeight - 1);
+			int sx = Mathf.Clamp(bounds.xMin + Mathf.RoundToInt(u * Mathf.Max(0, bounds.width - 1)), bounds.xMin, bounds.xMax - 1);
+			int sy = Mathf.Clamp(bounds.yMin + Mathf.RoundToInt(v * Mathf.Max(0, bounds.height - 1)), bounds.yMin, bounds.yMax - 1);
+			var pixel = source.GetPixel(sx, sy);
+			if (IsEnemyDiceSheetBackground(pixel))
+				pixel = Color.clear;
+			atlas.SetPixel(tileX + x, tileY + y, pixel);
+		}
+	}
+
+	static bool TryFindDiceFaceBounds(Texture2D source, int tileX, int tileY, int tileWidth, int tileHeight,
+		out RectInt bounds)
+	{
+		int minX = tileX + tileWidth;
+		int minY = tileY + tileHeight;
+		int maxX = tileX - 1;
+		int maxY = tileY - 1;
+
+		for (int y = tileY; y < tileY + tileHeight; y++)
+		for (int x = tileX; x < tileX + tileWidth; x++)
+		{
+			if (IsEnemyDiceSheetBackground(source.GetPixel(x, y)))
+				continue;
+
+			minX = Mathf.Min(minX, x);
+			minY = Mathf.Min(minY, y);
+			maxX = Mathf.Max(maxX, x);
+			maxY = Mathf.Max(maxY, y);
+		}
+
+		if (maxX < minX || maxY < minY)
+		{
+			bounds = default;
+			return false;
+		}
+
+		bounds = new RectInt(minX, minY, maxX - minX + 1, maxY - minY + 1);
+		return true;
+	}
+
+	static bool IsEnemyDiceSheetBackground(Color pixel)
+	{
+		if (pixel.a <= 0.04f)
+			return true;
+
+		bool nearBlack = pixel.r <= 0.06f && pixel.g <= 0.06f && pixel.b <= 0.06f;
+		bool nearMagenta = pixel.r >= 0.70f && pixel.g <= 0.18f && pixel.b >= 0.70f;
+		return nearBlack || nearMagenta;
+	}
+
+	static string ToTitleCase(string value)
+	{
+		if (string.IsNullOrEmpty(value))
+			return value;
+		return char.ToUpperInvariant(value[0]) + value.Substring(1).ToLowerInvariant();
+	}
+
 	/// <summary>
 	/// 주사위 눈 1~6 스프라이트를 반환.
-	/// 이름 규칙: Assets/Textures/DiceFaces/face{1..6}.png — 파일이 이미 있으면 그대로 로드하고,
-	/// 없는 면만 점 패턴으로 절차 생성해 폴백. 수동 제작 스프라이트를 덮어쓰지 않는다.
+	/// 우선 D6_mine 원본에서 현재 주사위 면 이미지를 다시 잘라 저장 슬롯과 3D 주사위 외형을 맞춘다.
+	/// 원본이 없을 때만 기존 face{1..6}.png 또는 절차 생성 점 패턴으로 폴백한다.
 	/// </summary>
 	static Sprite[] GenerateDiceFaceSprites()
 	{
 		EnsureDirectory("Assets/Textures/DiceFaces");
+		DicePrefabBuilder.TryRegenerateFaceSpritesFromSource();
 
 		Sprite[] sprites = new Sprite[6];
 		for (int face = 0; face < 6; face++)
@@ -1115,7 +1106,7 @@ public static class DiceBattleSceneBuilder
 
 			if (System.IO.File.Exists(path))
 			{
-				// 수동 스프라이트 존재 — 임포터 설정만 보정 후 로드
+				// 생성된 스프라이트 존재 — 임포터 설정만 보정 후 로드
 				EnsureFaceSpriteImporter(path);
 				sprites[face] = AssetDatabase.LoadAssetAtPath<Sprite>(path);
 				if (sprites[face] != null)
@@ -1133,9 +1124,19 @@ public static class DiceBattleSceneBuilder
 		var importer = AssetImporter.GetAtPath(path) as TextureImporter;
 		if (importer == null) return;
 		bool dirty = false;
-		if (importer.textureType != TextureImporterType.Sprite)
+		if (importer.textureType != TextureImporterType.Sprite ||
+		    importer.spriteImportMode != SpriteImportMode.Single)
 		{
 			importer.textureType = TextureImporterType.Sprite;
+			importer.spriteImportMode = SpriteImportMode.Single;
+			dirty = true;
+		}
+		var settings = new TextureImporterSettings();
+		importer.ReadTextureSettings(settings);
+		if (settings.spriteMeshType != SpriteMeshType.FullRect)
+		{
+			settings.spriteMeshType = SpriteMeshType.FullRect;
+			importer.SetTextureSettings(settings);
 			dirty = true;
 		}
 		if (importer.filterMode != FilterMode.Point)
@@ -1200,12 +1201,12 @@ public static class DiceBattleSceneBuilder
 
 	/// <summary>주사위 5개를 생성하고 Dice 배열을 반환.</summary>
 	static Dice[] CreateDiceSet(string namePrefix, Vector3 basePos, int layer,
-		PhysicsMaterial bouncyMat, Material outlineMat, GameObject prefab, float dieRadius)
+		PhysicsMaterial bouncyMat, Material outlineMat, GameObject prefab, float dieRadius,
+		float diceScale)
 	{
 		var dice = new Dice[5];
 		for (int i = 0; i < 5; i++)
 		{
-			float x = -2.8f + i * 1.4f;
 			GameObject dieGo;
 			if (prefab != null)
 			{
@@ -1219,8 +1220,8 @@ public static class DiceBattleSceneBuilder
 				dieGo.transform.localScale = Vector3.one * 0.5f;
 			}
 
-			dieGo.transform.position = basePos + new Vector3(x, dieRadius, 1.2f);
-			dieGo.transform.localScale = Vector3.one * 0.7f;
+			dieGo.transform.position = basePos + InitialDiceSlotPosition(i, dieRadius);
+			dieGo.transform.localScale = Vector3.one * Mathf.Max(0.1f, diceScale);
 			SetLayerRecursive(dieGo, layer);
 
 			var rb = dieGo.GetComponent<Rigidbody>();
@@ -1229,6 +1230,7 @@ public static class DiceBattleSceneBuilder
 			rb.linearDamping = 0.25f;
 			rb.angularDamping = 0.25f;
 			rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+			rb.maxAngularVelocity = 50f;
 
 			foreach (var col in dieGo.GetComponentsInChildren<Collider>())
 				col.material = bouncyMat;
@@ -1239,5 +1241,16 @@ public static class DiceBattleSceneBuilder
 			dice[i] = dieComp;
 		}
 		return dice;
+	}
+
+	static Vector3 InitialDiceSlotPosition(int index, float dieRadius)
+	{
+		const float spacing = 1.05f;
+		const float rowSpacing = 1.05f;
+
+		if (index < 3)
+			return new Vector3((index - 1) * spacing, dieRadius, DiceSlotCenterZ + rowSpacing * 0.5f);
+
+		return new Vector3((index - 3.5f) * spacing, dieRadius, DiceSlotCenterZ - rowSpacing * 0.5f);
 	}
 }

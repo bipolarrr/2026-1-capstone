@@ -8,16 +8,35 @@ using System;
 /// <summary>
 /// 전투 로그 패널. 스크롤 가능한 텍스트 영역에 전투 이벤트를 누적 표시.
 /// </summary>
+public enum BattleEventPresentation
+{
+	LogOnly,
+	LogAndPopup,
+	LogAndAnimation
+}
+
+public readonly struct BattleLogEntry
+{
+	public readonly string Message;
+	public readonly BattleEventPresentation Presentation;
+
+	public BattleLogEntry(string message, BattleEventPresentation presentation)
+	{
+		Message = message;
+		Presentation = presentation;
+	}
+}
+
 public class BattleLog : MonoBehaviour
 {
 	[SerializeField] TMP_Text logText;
 	[SerializeField] ScrollRect scrollRect;
 
 	const int MaxCharacters = 2000;
-	readonly List<string> entries = new List<string>();
+	readonly List<BattleLogEntry> entries = new List<BattleLogEntry>();
 
-	public event Action<string> EntryAdded;
-	public IReadOnlyList<string> Entries => entries;
+	public event Action<BattleLogEntry> EntryAdded;
+	public IReadOnlyList<BattleLogEntry> Entries => entries;
 
 	void Awake()
 	{
@@ -25,13 +44,14 @@ public class BattleLog : MonoBehaviour
 			logText.text = "";
 	}
 
-	public void AddEntry(string message)
+	public void AddEntry(string message, BattleEventPresentation presentation = BattleEventPresentation.LogOnly)
 	{
 		if (string.IsNullOrEmpty(message))
 			return;
 
-		entries.Add(message);
-		EntryAdded?.Invoke(message);
+		var entry = new BattleLogEntry(message, presentation);
+		entries.Add(entry);
+		EntryAdded?.Invoke(entry);
 
 		if (logText == null)
 			return;
@@ -79,6 +99,9 @@ public class BattleLog : MonoBehaviour
 
 	public string BuildHistoryText()
 	{
-		return string.Join("\n", entries);
+		var lines = new string[entries.Count];
+		for (int i = 0; i < entries.Count; i++)
+			lines[i] = entries[i].Message;
+		return string.Join("\n", lines);
 	}
 }

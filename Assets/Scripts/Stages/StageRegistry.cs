@@ -41,6 +41,21 @@ public static class StageRegistry
 		return stages.TryGetValue(id, out var s) ? s : null;
 	}
 
+	public static bool TryGetNextStage(string currentStageId, out StageData nextStage)
+	{
+		EnsureInitialized();
+		nextStage = null;
+		if (string.IsNullOrEmpty(currentStageId))
+			return false;
+
+		int currentIndex = orderedIds.IndexOf(currentStageId);
+		if (currentIndex < 0 || currentIndex + 1 >= orderedIds.Count)
+			return false;
+
+		return stages.TryGetValue(orderedIds[currentIndex + 1], out nextStage)
+			&& nextStage != null;
+	}
+
 	public static IReadOnlyList<string> AllIds
 	{
 		get { EnsureInitialized(); return orderedIds; }

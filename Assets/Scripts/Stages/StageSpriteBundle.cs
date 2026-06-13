@@ -13,7 +13,10 @@ public class StageSpriteBundle
 	public Sprite   background;
 	public Sprite[] mobSprites;
 	public EnemySpriteAnimationSet[] mobAnimations;
+	public Sprite[] mobProjectileSprites;
+	public Sprite[] mobAttackVfxSprites;
 	public Sprite   bossSprite;
+	public EnemySpriteAnimationSet bossAnimation;
 }
 
 [System.Serializable]
@@ -22,4 +25,15 @@ public class EnemySpriteAnimationSet
 	public Sprite[] idleSprites;
 	public Sprite[] attackSprites;
 	public Sprite[] hitSprites;
+	public Sprite[] deathSprites;
+	public Vector2[] deathSpriteCenterOffsets;
+	public AnimationClip deathAnimationClip;
+	public float attackFrameRate;
+	public float deathFrameRate;
+	public float deathFrameRateMultiplier = 1f;
+	public float attackVisualScaleMultiplier = 1f;
+	public Vector2 attackVisualOffset;
+	public bool attackUseFullTextureFrames;
+	public bool attackPingPong;
+	public bool hitPingPong;
 }

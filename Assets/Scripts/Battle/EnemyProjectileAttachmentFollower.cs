@@ -59,7 +59,9 @@ public class EnemyProjectileAttachmentFollower : MonoBehaviour
 
 		float t = Mathf.Clamp01(normalizedFrame);
 		var parentRt = projectileRt.parent as RectTransform;
-		Rect parentRect = parentRt != null ? parentRt.rect : new Rect(0f, 0f, 1f, 1f);
+		Rect parentRect = parentRt != null
+			? EnemyVisualBoundsResolver.ResolveRenderedLocalRect(parentRt)
+			: new Rect(0f, 0f, 1f, 1f);
 
 		projectileRt.anchorMin = new Vector2(0.5f, 0.5f);
 		projectileRt.anchorMax = new Vector2(0.5f, 0.5f);
