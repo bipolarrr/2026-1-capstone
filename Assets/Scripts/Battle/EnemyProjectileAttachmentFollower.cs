@@ -76,6 +76,14 @@ public class EnemyProjectileAttachmentFollower : MonoBehaviour
 	public void SetFollowing(bool value)
 	{
 		CacheReferences();
+		if (!value && forceFalling)
+		{
+			following = false;
+			ApplyFallingPose(animator != null ? animator.CurrentFrameNormalized : 1f);
+			SetProjectileImageVisible(true);
+			return;
+		}
+
 		forceFalling = false;
 		following = value && projectileRt != null && projectileImage != null;
 		if (following)
